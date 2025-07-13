@@ -86,12 +86,6 @@ SECTIONS
     _data_start = ABSOLUTE(.);
     *(.data)
     *(.data.*)
-    *(.data1)
-    *(.sdata)
-    *(.sdata.*)
-    *(.sdata2)
-    *(.sdata2.*)
-    *(.jcr)
     _data_end = ABSOLUTE(.);
   } >dram_seg
 
