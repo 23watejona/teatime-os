@@ -60,7 +60,6 @@ SECTIONS
     *(.iram1 .iram1.*) /* catch stray IRAM_ATTR */
     *(.fini.literal)
     *(.fini)
-    *(.gnu.version)
     _text_end = ABSOLUTE(.);
     _etext = .;
   } > iram_seg
@@ -70,18 +69,13 @@ SECTIONS
   {
     . = ALIGN (8);
     _bss_start = ABSOLUTE(.);
-    *(.dynsbss)
     *(.sbss)
     *(.sbss.*)
-    *(.gnu.linkonce.sb.*)
     *(.scommon)
     *(.sbss2)
     *(.sbss2.*)
-    *(.gnu.linkonce.sb2.*)
-    *(.dynbss)
     *(.bss)
     *(.bss.*)
-    *(.gnu.linkonce.b.*)
     *(COMMON)
     . = ALIGN (8);
     _bss_end = ABSOLUTE(.);
@@ -92,14 +86,11 @@ SECTIONS
     _data_start = ABSOLUTE(.);
     *(.data)
     *(.data.*)
-    *(.gnu.linkonce.d.*)
     *(.data1)
     *(.sdata)
     *(.sdata.*)
-    *(.gnu.linkonce.s.*)
     *(.sdata2)
     *(.sdata2.*)
-    *(.gnu.linkonce.s2.*)
     *(.jcr)
     _data_end = ABSOLUTE(.);
   } >dram_seg
@@ -109,41 +100,6 @@ SECTIONS
     _rodata_start = ABSOLUTE(.);
     *(.rodata)
     *(.rodata.*)
-    *(.gnu.linkonce.r.*)
-    *(.rodata1)
-    __XT_EXCEPTION_TABLE_ = ABSOLUTE(.);
-    *(.xt_except_table)
-    *(.gcc_except_table)
-    *(.gnu.linkonce.e.*)
-    *(.gnu.version_r)
-    *(.eh_frame)
-    . = (. + 3) & ~ 3;
-    /*  C++ constructor and destructor tables, properly ordered:  */
-    __init_array_start = ABSOLUTE(.);
-    KEEP (*crtbegin.o(.ctors))
-    KEEP (*(EXCLUDE_FILE (*crtend.o) .ctors))
-    KEEP (*(SORT(.ctors.*)))
-    KEEP (*(.ctors))
-    __init_array_end = ABSOLUTE(.);
-    KEEP (*crtbegin.o(.dtors))
-    KEEP (*(EXCLUDE_FILE (*crtend.o) .dtors))
-    KEEP (*(SORT(.dtors.*)))
-    KEEP (*(.dtors))
-    /*  C++ exception handlers table:  */
-    __XT_EXCEPTION_DESCS_ = ABSOLUTE(.);
-    *(.xt_except_desc)
-    *(.gnu.linkonce.h.*)
-    __XT_EXCEPTION_DESCS_END__ = ABSOLUTE(.);
-    *(.xt_except_desc_end)
-    *(.dynamic)
-    *(.gnu.version_d)
-    _rodata_end = ABSOLUTE(.);
-    /* Literals are also RO data. */
-    _lit4_start = ABSOLUTE(.);
-    *(*.lit4)
-    *(.lit4.*)
-    *(.gnu.linkonce.lit4.*)
-    _lit4_end = ABSOLUTE(.);
     . = ALIGN(4);
     _heap_start = ABSOLUTE(.);
   } >dram_seg
