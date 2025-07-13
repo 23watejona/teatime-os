@@ -69,11 +69,6 @@ SECTIONS
   {
     . = ALIGN (8);
     _bss_start = ABSOLUTE(.);
-    *(.sbss)
-    *(.sbss.*)
-    *(.scommon)
-    *(.sbss2)
-    *(.sbss2.*)
     *(.bss)
     *(.bss.*)
     *(COMMON)
