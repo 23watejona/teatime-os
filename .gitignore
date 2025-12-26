@@ -1,3 +1,7 @@
-compile/build/*
-compile/prog.bin
-compile/prog.elf
+**/*.swp
+**/*.o
+**/*.dump
+**/*.bin
+**/*.elf
+**/*.map
+compile/build/
