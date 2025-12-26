@@ -13,10 +13,13 @@ ASM_FLAGS=--warn --fatal-warnings
 # try $(wildcard)
 SRC_C=$(shell ./list_src.sh c)
 SRC_S=$(shell ./list_src.sh s)
+SRC_S_CAP=$(shell ./list_src.sh S)
+
 
 OBJ_C=$(SRC_C:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 OBJ_S=$(SRC_S:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o)
-OBJ=$(OBJ_C) $(OBJ_S)
+OBJ_S_CAP=$(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
+OBJ=$(OBJ_C) $(OBJ_S) $(OBJ_S_CAP)
 DEPENDS=$(OBJ_C:%.o %.d)
 
 ESPTOOL=esptool
@@ -53,6 +56,10 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $$(@D)/
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.s | $$(@D)/
 	@echo "Assembling $<"
 	@$(ASM) -o $@ -I $(INCLUDE_DIR) -c $(ASN_FLAGS) $<
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.S | $$(@D)/
+	@echo "Assembling $<"
+	@$(CC) -o $@ -I $(INCLUDE_DIR) -c $(ASN_FLAGS) $<
 
 $(BUILD_DIR)%/:
 	@echo "Generating build dir $@"
