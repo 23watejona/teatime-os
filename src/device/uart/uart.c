@@ -12,6 +12,7 @@
 #define UART_TXFIFO_CNT 0x000000FF
 #define UART_TXFIFO_CNT_S 16
 
+char *itoau(int, char *, int);
 char *itoa(int, char *, int);
 
 void kputc_uart(int c) {
@@ -41,9 +42,33 @@ void kprintf_uart(char *f, ...) {
             int tmp_d = va_arg(args, int);
             char buf[12] = {0};
             kprintf_uart(itoa(tmp_d, buf, 10));
-            f++;
+            ++f;
           }
           break;
+       case 'u':
+          {
+            unsigned int tmp_d = va_arg(args, unsigned int);
+            char buf[12] = {0};
+            kprintf_uart(itoau(tmp_d, buf, 10));
+            ++f;
+          }
+          break;
+       case 'x':
+          {
+            unsigned int tmp_d = va_arg(args, unsigned int);
+            char buf[12] = {0};
+	    kprintf_uart("0x");
+            kprintf_uart(itoau(tmp_d, buf, 16));
+            ++f;
+          }
+          break;
+	case 's':
+	  {
+	    char *str = va_arg(args, char *);
+	    kprintf_uart(str);
+	    ++f;
+	  }
+	  break;
         default:
           kputc_uart(*f++);
       }

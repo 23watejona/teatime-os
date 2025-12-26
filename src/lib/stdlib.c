@@ -15,6 +15,20 @@ static void udivmod(unsigned long num, unsigned long den, unsigned long *quot, u
     *rem = r;
 }
 
+unsigned long __udivsi3(unsigned long a, unsigned long b) {
+    unsigned long q;
+    unsigned long r;
+    udivmod(a, b, &q, &r);
+    return q;
+}
+
+unsigned long __umodsi3(unsigned long a, unsigned long b) {
+    unsigned long q;
+    unsigned long r;
+    udivmod(a, b, &q, &r);
+    return r;
+}
+
 long __divsi3(long a, long b) {
     unsigned long ua = a < 0 ? -(unsigned long)a : a;
     unsigned long ub = b < 0 ? -(unsigned long)b : b;
