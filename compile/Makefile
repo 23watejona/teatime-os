@@ -44,7 +44,7 @@ prog.bin: prog.elf
 
 prog.elf: $(OBJ)
 	@echo "Generating $@"
-	@$(LD) $(LD_FLAGS) prog.ld $^ -o $@
+	@$(LD) $(LD_FLAGS) prog.ld peri.ld $^ -o $@
 
 .SECONDEXPANSION:
 
