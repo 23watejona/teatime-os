@@ -1,38 +1,78 @@
+#include "uart.h"
+#include "proc.h"
+
 extern int initmem(void);
 extern char *alloc_stack(unsigned int);
 extern void start_proc(void (*)(void));
+extern int get_pid(void);
 
 
-unsigned int *create(void *funcaddr, unsigned int stack_size) {
-     // allocate stack and move the pointer to the beginning
-    unsigned int *stack_addr = (unsigned int *)alloc_stack(stack_size) + ((stack_size >> 2));
-    
-    unsigned int *save_stack_addr; // we need this to keep track of where to store the stack pointer
+// since this is a stack frame we go in reverse order
+#define NUM_AREG (16)
+struct ctxsw_stack_frame {
+    unsigned int epc1; // a0
+    unsigned int ps; // a0
+    unsigned int sar; // a0
+    unsigned int intenable;
+    union {
+        struct {
+            unsigned int a0;
+            unsigned int a1;
+            unsigned int a2;
+            unsigned int a3;
+            unsigned int a4;
+            unsigned int a5;
+            unsigned int a6;
+            unsigned int a7;
+            unsigned int a8;
+            unsigned int a9;
+            unsigned int a10;
+            unsigned int a11;
+            unsigned int a12;
+            unsigned int a13;
+            unsigned int a14;
+            unsigned int a15;
+        } reg;
+        unsigned int raw_areg_mem[NUM_AREG];
+    } address_regs;
+};
 
 
-    // Make it look like we were saved after a context switch
-    
-    // zero out ars a15-a3
-    *stack_addr = 0;
-    for (int i = 0; i < 13; ++i) {
-        *--stack_addr = 0;
+void verify_size() {
+    int dummy = 0;
+    switch (dummy) {
+        case 0 == 1:
+        case sizeof(struct ctxsw_stack_frame) == 80: // Stack frame should be 80 bytes
+            break;
     }
+}
 
-    // a2 is where we pass the first argument. start_proc expects an argument of the process (function) to run
-    *--stack_addr = (unsigned int)funcaddr; // set a2=argument 1 to be the function to run
-
-    // a1 is the stack pointer`
-    save_stack_addr = --stack_addr; // wait till later to store sp
-
-    // a0 is the return address
-    *--stack_addr = (unsigned int)start_proc; // wrapper to handle process ending
+int create(void *funcaddr, unsigned int stack_size, int priority) {
+    int pid = get_pid();
     
-    // zero out special registers intenable, sar, ps, epc1, as each of these start in a fresh state
-    *--stack_addr = 0; //interrupts are disabled
-    *--stack_addr = 0; // sar should be 0
-    *--stack_addr = 0; // ps is 0?
-    *--stack_addr = 0; // epc1 is not set
+    // allocate stack and move the pointer to the beginning
+    unsigned int *stack_addr = ((unsigned int *)alloc_stack(stack_size)) + (stack_size >> 2);
     
-    *save_stack_addr = (unsigned int)stack_addr;
-    return stack_addr;
+    // allocate space for stack frame
+    stack_addr = (unsigned int *)((char *)(stack_addr) - sizeof(struct ctxsw_stack_frame));
+    struct ctxsw_stack_frame *frame = (struct ctxsw_stack_frame *)stack_addr;
+    
+    // zero out aregs in frame
+    for (int i = 0; i < NUM_AREG; ++i) {
+        frame->address_regs.raw_areg_mem[i] = 0;
+    }
+    frame->address_regs.reg.a3 = pid;
+    frame->address_regs.reg.a2 = (unsigned int) funcaddr;
+    frame->address_regs.reg.a1 = (unsigned int) stack_addr;
+    frame->address_regs.reg.a0 = (unsigned int) start_proc;
+    frame->intenable = 0;
+    frame->sar = 0;
+    frame->ps = 0;
+    frame->epc1 = 0;
+
+    proctab[pid].status = PROC_AVAIL;
+    proctab[pid].stk_ptr = (unsigned int *)stack_addr;
+    proctab[pid].priority = priority;
+    
+    return pid;
 }

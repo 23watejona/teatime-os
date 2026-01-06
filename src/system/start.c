@@ -1,57 +1,53 @@
 #include "uart.h"
 #include "reg_util.h"
+#include "proc.h"
+#include "proc_queue.h"
+
+#define NULL_STK 512
+#define INIT_STK 1024
+
+extern void main(void);
 
 extern void ctxsw(unsigned int **, unsigned int **);
 extern int initmem(void);
-extern char *alloc(unsigned int);
 extern char *alloc_stack(unsigned int);
-extern unsigned int intr_unmask(unsigned int);
-extern unsigned int *create(void *, unsigned int);
 extern void _set_vec_base(void);
+extern void sched(void);
+extern void make_avail(int);
+extern queue_entry *avail_list;
 
-unsigned int *proc1_sp = 0;
-unsigned int *proc2_sp = 0;
-unsigned int *main_sp = 0;
+proctab_entry proctab[NUM_PROC] = {0};
+int curr_pid = 0;
 
-void null_proc() {
-    while (1) {
-        BUSY_WAIT();
-        kprintf_uart("running null proc\n");
-    }
-}
-
-void proc1() {
-    //int i = 0;
-    for (int i = 0; i < 5;) {
-        BUSY_WAIT();
-        kprintf_uart("proc1 %d\n", i++);
-        ctxsw(&proc1_sp, &proc2_sp);
-    }
-    kprintf_uart("Ending process 1\n");
-}
-
-void proc2() {
-    int i = 0;
-    while (1) {
-        BUSY_WAIT();
-        kprintf_uart("proc2 %d\n", i++);
-        ctxsw(&proc2_sp, &main_sp);
-    }
-}
 
 void start ( void )
 {
     _set_vec_base();
     BUSY_WAIT();
     initmem();
-    alloc_stack(512);
-    proc1_sp = create(&proc1, 1024);
-    proc2_sp = create(proc2, 1024);
 
-    while(1)
-    {
-        BUSY_WAIT();
-        kprintf_uart("Running main\n");
-        ctxsw(&main_sp, &proc1_sp);
+    alloc_stack(NULL_STK);
+    
+    for (int i = 0; i < NUM_PROC; ++i) {
+        proctab[i].status = PROC_UNUSED;
+    }
+
+    /* set up null process entry */
+    proctab_entry *null_pr = &(proctab[NULL_PROC]);
+    null_pr->status = PROC_CURR;
+    null_pr->stk_ptr = 0; // this will get overwritten with the correct sp the first time it is switched out
+    null_pr->priority = PROC_NULL_PRIO; // null process has strictly the least priority
+    
+    curr_pid = 0; // currently running the "null" process
+
+    avail_list = new_queue();
+
+    make_avail(create(main, INIT_STK, 5));
+    sched();
+    
+    // become the null process
+    while (1) {
+        kprintf_uart("halting processor from null proc\n");
+        __asm__("waiti 0");
     }
 }
