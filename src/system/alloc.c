@@ -9,7 +9,7 @@ char *alloc(unsigned int size) {
 	memblk_t *prev = NULL;
 	struct memblk_t *itr = freelist;
 	while (itr != NULL) {
-		if (itr->size > size) {
+		if (itr->size >= size) {
 			if (prev) {
 				prev->next = itr->next;
 			} else {
@@ -52,7 +52,7 @@ char *alloc_stack(unsigned int size) {
 	memblk_t *poten_prev = NULL;
 	memblk_t *poten = NULL;
 	while (itr != NULL) {
-		if (itr->size > size) {
+		if (itr->size >= size) {
 			poten_prev = prev;
 			poten = itr;
 		}
@@ -76,10 +76,10 @@ char *alloc_stack(unsigned int size) {
 	}
 
 	// split the block
-	memblk_t *rem = poten; // returned block
+	memblk_t *rem = poten; // remaining block
 	rem->size = poten->size - size;
 
-	memblk_t *ret = (memblk_t *)((char *)poten + poten->size); // remaining block
+	memblk_t *ret = (memblk_t *)((char *)poten + poten->size); // returned block
 	ret->size = size;
 
 	if (poten_prev) {
