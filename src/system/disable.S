@@ -2,5 +2,5 @@
     .align 4
     .global disable
 disable:
-    rsil a2, 2
+    rsil a2, 15
     ret
