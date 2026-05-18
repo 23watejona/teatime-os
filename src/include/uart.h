@@ -1,6 +1,8 @@
 #ifndef UART_H
 #define UART_H
 
+#define UART_DEFAULT_BAUD (76800u)
+
 void kprintf_uart(char *f, ...);
 void kputc_uart(int c);
 
