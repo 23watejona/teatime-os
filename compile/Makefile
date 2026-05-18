@@ -4,7 +4,7 @@ SRC_DIR=$(BASE_DIR)/src
 INCLUDE_DIR=$(SRC_DIR)/include
 
 CC=xtensa-lx106-elf-gcc 
-C_FLAGS=-MMD -P -Wall -Werror -O0 -ffreestanding 
+C_FLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-missing-braces -O0 -ffreestanding -fzero-initialized-in-bss
 LD=xtensa-lx106-elf-ld
 LD_FLAGS=-nostdlib -nostartfiles -T
 ASM=xtensa-lx106-elf-as
@@ -20,10 +20,10 @@ OBJ_C=$(SRC_C:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 OBJ_S=$(SRC_S:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o)
 OBJ_S_CAP=$(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
 OBJ=$(OBJ_C) $(OBJ_S) $(OBJ_S_CAP)
-DEPENDS=$(OBJ_C:%.o %.d)
+DEPENDS=$(OBJ_C:%.o=%.d)
 
 ESPTOOL=esptool
-ESPELF=elf2image
+ESPELF=--chip esp8266 elf2image
 ESPFLASH=--port /dev/ttyUSB0 write_flash
 ESPFLASHFLAGS=-fm qio 0x00000
 

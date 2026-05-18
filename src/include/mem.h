@@ -3,8 +3,8 @@
 #include "def.h"
 
 #define MIN_ALLOC (16)
-#define floor_memblk(size) ((unsigned int)size & ~7)
-#define ceil_memblk(size) ((7 + (unsigned int)size) & ~7)
+#define floor_memblk(size) ((unsigned int)size & ~7u)
+#define ceil_memblk(size) ((7 + (unsigned int)size) & ~7u)
 
 extern int *heap_end;
 extern int *heap_start;
