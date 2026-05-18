@@ -29,7 +29,7 @@ queue_entry *new_queue() {
     return queue_head;
 }
 
-void proc_enqueue(queue_entry *queue, int pid, int key) {
+IRAM_ATTR void proc_enqueue(queue_entry *queue, int pid, int key) {
     queue_entry *process_queue_entry = &process_queues[pid];
     process_queue_entry->pid = pid;
     process_queue_entry->key = key;

@@ -1,3 +1,4 @@
+#include "def.h"
 #include "proc.h"
 #include "proc_queue.h"
 

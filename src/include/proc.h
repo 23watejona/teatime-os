@@ -20,6 +20,13 @@ typedef struct proctab_entry {
 } proctab_entry;
 
 extern proctab_entry proctab[NUM_PROC];
+extern int curr_pid;
+
+/* kernel only */
+int disable(void);
+void enable(int mask);
+void sched(void);
+
 extern int create(void *func, unsigned int stack_size, int priority);
 
 #endif // PROC_H

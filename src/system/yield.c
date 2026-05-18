@@ -1,5 +1,4 @@
-extern void sched(void);
-
+#include "proc.h"
 
 void yield() {
     sched();
