@@ -3,51 +3,58 @@
 #include "proc.h"
 #include "proc_queue.h"
 
-#define NULL_STK 512
-#define INIT_STK 1024
+#define NULL_STK 1024
+#define INIT_STK 2048
 
-extern void main(void);
 
-extern void ctxsw(unsigned int **, unsigned int **);
-extern int initmem(void);
-extern char *alloc_stack(unsigned int);
-extern void _set_vec_base(void);
-extern void sched(void);
-extern void make_avail(int);
+void ctxsw(unsigned int **, unsigned int **);
+int initmem(void);
+char *alloc_stack(unsigned int);
+void _set_vec_base(void);
+void sched(void);
+void make_avail(int);
+void unused();
+int init_cpu_clk(unsigned int clk_rate_mhz);
+void init_cpu_timer(void);
+void startup_proc(void);
+void main(void);
+int disable();
+
+unsigned int intr_unmask(unsigned int);
+
 extern queue_entry *avail_list;
 
 proctab_entry proctab[NUM_PROC] = {0};
 int curr_pid = 0;
 
-
 void start ( void )
 {
     _set_vec_base();
     BUSY_WAIT();
+    init_cpu_clk(80);
     initmem();
-
-    alloc_stack(NULL_STK);
     
+    alloc_stack(NULL_STK);
+
     for (int i = 0; i < NUM_PROC; ++i) {
         proctab[i].status = PROC_UNUSED;
     }
 
-    /* set up null process entry */
-    proctab_entry *null_pr = &(proctab[NULL_PROC]);
-    null_pr->status = PROC_CURR;
-    null_pr->stk_ptr = 0; // this will get overwritten with the correct sp the first time it is switched out
-    null_pr->priority = PROC_NULL_PRIO; // null process has strictly the least priority
-    
-    curr_pid = 0; // currently running the "null" process
-
+    proctab_entry *null_proc_entry = &proctab[0];
+    null_proc_entry->status = PROC_CURR;
+    null_proc_entry->priority = PROC_NULL_PRIO;
+    curr_pid = 0;
     avail_list = new_queue();
+    make_avail(NULL_PROC);
 
-    make_avail(create(main, INIT_STK, 5));
-    sched();
     
-    // become the null process
+    int pid = create(main, INIT_STK, 5);
+    kprintf_uart("created main as pid %d\n", pid);
+    make_avail(pid);
+    
+    // enable timer interrupts
+    init_cpu_timer();
     while (1) {
-        kprintf_uart("halting processor from null proc\n");
-        __asm__("waiti 0");
+        asm("waiti 0");
     }
 }

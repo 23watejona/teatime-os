@@ -10,9 +10,9 @@ extern int get_pid(void);
 // since this is a stack frame we go in reverse order
 #define NUM_AREG (16)
 struct ctxsw_stack_frame {
-    unsigned int epc1; // a0
-    unsigned int ps; // a0
-    unsigned int sar; // a0
+    unsigned int epc1;
+    unsigned int ps;
+    unsigned int sar;
     unsigned int intenable;
     union {
         struct {
@@ -37,16 +37,6 @@ struct ctxsw_stack_frame {
     } address_regs;
 };
 
-
-void verify_size() {
-    int dummy = 0;
-    switch (dummy) {
-        case 0 == 1:
-        case sizeof(struct ctxsw_stack_frame) == 80: // Stack frame should be 80 bytes
-            break;
-    }
-}
-
 int create(void *funcaddr, unsigned int stack_size, int priority) {
     int pid = get_pid();
     
@@ -61,14 +51,14 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
     for (int i = 0; i < NUM_AREG; ++i) {
         frame->address_regs.raw_areg_mem[i] = 0;
     }
-    frame->address_regs.reg.a3 = pid;
+    frame->address_regs.reg.a3 = (unsigned int)pid;
     frame->address_regs.reg.a2 = (unsigned int) funcaddr;
     frame->address_regs.reg.a1 = (unsigned int) stack_addr;
     frame->address_regs.reg.a0 = (unsigned int) start_proc;
-    frame->intenable = 0;
+    frame->intenable = 0x40; // 1 << 6 = clock interrupts enabled
     frame->sar = 0;
     frame->ps = 0;
-    frame->epc1 = 0;
+    frame->epc1 = (unsigned int)start_proc;
 
     proctab[pid].status = PROC_AVAIL;
     proctab[pid].stk_ptr = (unsigned int *)stack_addr;

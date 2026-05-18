@@ -18,9 +18,9 @@ typedef struct queue_entry {
 
 extern queue_entry process_queues[NUM_QENT];
 extern queue_entry *new_queue();
-extern void proc_enqueue(queue_entry *queue, int pid, int priority);
+extern void proc_enqueue(queue_entry *queue, int pid, int key);
 extern void proc_remove(int pid);
-extern int proc_dequeue();
+extern int proc_dequeue(queue_entry *queue);
 
 
 #endif // PROC_QUEUE_H

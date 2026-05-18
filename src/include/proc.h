@@ -9,14 +9,14 @@
 #define NUM_PROC 4
 #define NULL_PROC 0
 
-#define PROC_NULL_PRIO 0
+#define PROC_NULL_PRIO 0 // strictly the lowest priority
 #define PROC_MIN_PRIO 1
 #define PROC_MAX_PRIO 10
 
 typedef struct proctab_entry {
     unsigned int status;
     unsigned int *stk_ptr;
-    unsigned int priority;
+    int priority;
 } proctab_entry;
 
 extern proctab_entry proctab[NUM_PROC];
