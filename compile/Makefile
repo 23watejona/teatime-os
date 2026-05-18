@@ -22,9 +22,10 @@ OBJ_S_CAP=$(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
 OBJ=$(OBJ_C) $(OBJ_S) $(OBJ_S_CAP)
 DEPENDS=$(OBJ_C:%.o=%.d)
 
+USB?=/dev/ttyUSB0
 ESPTOOL=esptool
 ESPELF=--chip esp8266 elf2image
-ESPFLASH=--port /dev/ttyUSB0 write_flash
+ESPFLASH=--port $(USB) write_flash
 ESPFLASHFLAGS=-fm qio 0x00000
 
 .PHONY: all flash clean
@@ -34,7 +35,7 @@ all: flash monitor
 flash: prog.bin
 	$(ESPTOOL) $(ESPFLASH) $(ESPFLASHFLAGS) $<
 monitor:
-	picocom /dev/ttyUSB0 -b 76800
+	picocom $(USB) -b 76800
 
 prog.bin: prog.elf
 	@echo "Generating $@ from $<"
