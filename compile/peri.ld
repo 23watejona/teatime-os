@@ -1,1 +1,2 @@
 PROVIDE (uart0 = 0x60000000);
+PROVIDE (frc1 = 0x60000600);
