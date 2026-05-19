@@ -20,6 +20,7 @@ void init_wifi_clk(void);
 void init_wifi_pbus(void);
 void init_wifi_iomux(void);
 void init_wifi_bb(void);
+void init_wifi_mac(void);
 void startup_proc(void);
 void main(void);
 int disable();
@@ -56,6 +57,7 @@ void start ( void )
     init_wifi_pbus();
     init_wifi_iomux();
     init_wifi_bb();
+    init_wifi_mac();
 
     int pid = create(main, INIT_STK, 5);
     kprintf_uart("created main as pid %d\n", pid);
