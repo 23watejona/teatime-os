@@ -22,6 +22,7 @@ void init_wifi_iomux(void);
 void init_wifi_bb(void);
 void init_wifi_dma(void);
 void init_wifi_mac(void);
+void init_wifi_mac_addr(void);
 void startup_proc(void);
 void main(void);
 int disable();
@@ -60,6 +61,7 @@ void start ( void )
     init_wifi_bb();
     init_wifi_dma();
     init_wifi_mac();
+    init_wifi_mac_addr();
 
     int pid = create(main, INIT_STK, 5);
     kprintf_uart("created main as pid %d\n", pid);
