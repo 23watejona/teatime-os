@@ -23,6 +23,7 @@ void init_wifi_bb(void);
 void init_wifi_dma(void);
 void init_wifi_mac(void);
 void init_wifi_mac_addr(void);
+void wifi_set_channel(unsigned int);
 void startup_proc(void);
 void main(void);
 int disable();
@@ -62,6 +63,7 @@ void start ( void )
     init_wifi_dma();
     init_wifi_mac();
     init_wifi_mac_addr();
+    wifi_set_channel(1);
 
     int pid = create(main, INIT_STK, 5);
     kprintf_uart("created main as pid %d\n", pid);
