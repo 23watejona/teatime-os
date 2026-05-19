@@ -16,6 +16,7 @@ void make_avail(int);
 void unused();
 int init_cpu_clk(unsigned int clk_rate_mhz);
 void init_cpu_timer(void);
+void init_wifi_clk(void);
 void startup_proc(void);
 void main(void);
 int disable();
@@ -48,6 +49,8 @@ void start ( void )
     make_avail(NULL_PROC);
 
     
+    init_wifi_clk();
+
     int pid = create(main, INIT_STK, 5);
     kprintf_uart("created main as pid %d\n", pid);
     make_avail(pid);
