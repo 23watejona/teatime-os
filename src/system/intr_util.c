@@ -1,28 +1,13 @@
+#include "def.h"
+#include "intr.h"
+#include "proc.h"
 #include "uart.h"
 #include "reg_util.h"
 #include "timer.h"
 
 unsigned int intr_enable(unsigned int mask);
-unsigned int disable();
-unsigned int enable();
-void sched();
-void double_exc_handler();
-void handle_cpu_timer_intr();
 
-void (*l1_interrupt_handlers[12])(void) = {
-    double_exc_handler, // 0 
-    double_exc_handler, // 1
-    double_exc_handler, // 2
-    double_exc_handler, // 3
-    double_exc_handler, // 4
-    double_exc_handler, // 5
-    handle_cpu_timer_intr, // 6 = cpu timer
-    double_exc_handler, // 7
-    double_exc_handler, // 8
-    double_exc_handler, // 9
-    double_exc_handler, // 10
-    double_exc_handler, // 11
-};
+void (*l1_interrupt_handlers[NUM_L1_INTR])(void);
 
 void debug_handler() {
   unsigned int debug_cause = 0;
@@ -65,12 +50,13 @@ void syscall_handler (unsigned int exccause, unsigned int int_cause) {
             asm("rsr.interrupt %0\n" : "=r"(interrupt));
             asm("rsr.intenable %0\n" : "=r"(intenable));
             unsigned int masked_interrupts = interrupt & intenable;
-            for (int i = 0; i < 12; ++i) {
+            for (int i = 0; i < NUM_L1_INTR; ++i) {
                 int curr_intr_mask = 1u << i;
-                if ( masked_interrupts & curr_intr_mask) {
-                    asm("wsr.intclear %0\nrsync\n" : : "r"(curr_intr_mask) : );
-                    (l1_interrupt_handlers[i])();
-               }
+                if (!(masked_interrupts & curr_intr_mask))
+                    continue;
+                asm("wsr.intclear %0\nrsync\n" : : "r"(curr_intr_mask) : );
+                if (l1_interrupt_handlers[i])
+                    l1_interrupt_handlers[i]();
             }
             break;
     }
@@ -79,6 +65,8 @@ void syscall_handler (unsigned int exccause, unsigned int int_cause) {
 void double_exc_handler() {
   kprintf_uart("\nagggg what am i doing here\n");
 }
+
+void nmi_handler() {}
 
 unsigned int intr_unmask(unsigned int mask) {
     return intr_enable(mask);    

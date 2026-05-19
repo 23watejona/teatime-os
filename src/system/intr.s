@@ -16,7 +16,9 @@ rfi 2
   .section	.NMIExceptionVector.text,"ax",@progbits
 	.align	4
 NMIExceptionVector:
-    rfi 3
+    wsr.EXCSAVE3 a0
+    wsr.EXCSAVE2 a1
+    j drive_nmi
 
   .section	.KernelExceptionVector.text,"ax",@progbits
 	.align	4
@@ -61,3 +63,10 @@ intr_enable:
   mov.n a2, a3
   ret.n
 
+drive_nmi:
+    call0 _create_nmi_frame
+    call0 nmi_handler
+    call0 _restore_nmi_frame
+    rsr.EXCSAVE3 a0
+    rsr.EXCSAVE2 a1
+    rfi 3

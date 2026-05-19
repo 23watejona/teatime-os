@@ -6,12 +6,12 @@
 #define PROC_AVAIL 2 // this proc can be scheduled
 #define PROC_CURR 3 // this proc is currently running
 
-#define NUM_PROC 4
+#define NUM_PROC 10
 #define NULL_PROC 0
 
 #define PROC_NULL_PRIO 0 // strictly the lowest priority
 #define PROC_MIN_PRIO 1
-#define PROC_MAX_PRIO 10
+#define PROC_MAX_PRIO 15
 
 typedef struct proctab_entry {
     unsigned int status;

@@ -1,13 +1,12 @@
 #include "uart.h"
 #include "reg_util.h"
 #include "timer.h"
+#include "intr.h"
 
-extern int initmem(void);
-extern char *alloc(unsigned int);
-extern char *alloc_stack(unsigned int);
-extern unsigned int intr_unmask(unsigned int);
+extern void handle_cpu_timer_intr(void);
 
 void init_cpu_timer() {
+    l1_interrupt_handlers[6] = handle_cpu_timer_intr;
     WRITE_REG(0x3ff00014, READ_REG(0x3ff00014) & 0xFFFFFFE);
     asm("movi a12, 0\nwsr.ccount a12\nmovi a12, 80000000\nwsr.ccompare0 a12\nrsync");
     intr_unmask(1 << 6); // Enable CPU_CLK interrupts
