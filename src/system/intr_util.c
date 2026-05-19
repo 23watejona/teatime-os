@@ -66,7 +66,11 @@ void double_exc_handler() {
   kprintf_uart("\nagggg what am i doing here\n");
 }
 
-void nmi_handler() {}
+void wifi_fiq_dispatch(void);
+
+IRAM_ATTR void nmi_handler() {
+    wifi_fiq_dispatch();
+}
 
 unsigned int intr_unmask(unsigned int mask) {
     return intr_enable(mask);    
