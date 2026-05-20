@@ -13,6 +13,8 @@ struct lldesc {
 };
 _Static_assert(sizeof(struct lldesc) == 12, "lldesc must be 12 bytes");
 
+extern struct lldesc *rx_ring;
+
 void init_wifi_dma(void);
 void lldesc_init_tx(struct lldesc *d, void *buf, unsigned int len);
 

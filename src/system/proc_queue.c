@@ -47,6 +47,19 @@ IRAM_ATTR void proc_enqueue(queue_entry *queue, int pid, int key) {
 }
 
 
+IRAM_ATTR void proc_remove(int pid) {
+    queue_entry *process_queue_entry = &process_queues[pid];
+
+    if (process_queue_entry->next == NULL || process_queue_entry->prev == NULL)
+        return;
+
+    process_queue_entry->prev->next = process_queue_entry->next;
+    process_queue_entry->next->prev = process_queue_entry->prev;
+
+    process_queue_entry->next = NULL;
+    process_queue_entry->prev = NULL;
+}
+
 int proc_dequeue(queue_entry *queue) {
     queue_entry *process_queue_entry = queue->next;
     

@@ -9,10 +9,13 @@
 #define FIQ_TX_DONE (1u << 19)
 
 volatile unsigned int wifi_fiq_tx_count;
+volatile unsigned int wifi_rx_pending;
 
 IRAM_ATTR void wifi_fiq_dispatch(void) {
     unsigned int status = READ_REG(MAC_INT_EVENT);
 
+    if (status & FIQ_RX_DONE)
+        wifi_rx_pending = 1;
     if (status & FIQ_TX_DONE)
         wifi_fiq_tx_count++;
 

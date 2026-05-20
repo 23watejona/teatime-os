@@ -5,6 +5,7 @@
 #define PROC_UNAVAIL 1 // this proc is used, but cannot be scheduled
 #define PROC_AVAIL 2 // this proc can be scheduled
 #define PROC_CURR 3 // this proc is currently running
+#define PROC_IO_WAIT 4 // this proc is blocked waiting on IO
 
 #define NUM_PROC 10
 #define NULL_PROC 0

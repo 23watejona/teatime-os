@@ -25,8 +25,11 @@ void init_wifi_mac(void);
 void init_wifi_mac_addr(void);
 void wifi_set_channel(unsigned int);
 void startup_proc(void);
+void wifi_rx_servicer(void);
 void main(void);
 int disable();
+
+extern int wifi_rx_servicer_pid;
 
 unsigned int intr_unmask(unsigned int);
 
@@ -68,7 +71,10 @@ void start ( void )
     int pid = create(main, INIT_STK, 5);
     kprintf_uart("created main as pid %d\n", pid);
     make_avail(pid);
-    
+
+    wifi_rx_servicer_pid = create(wifi_rx_servicer, INIT_STK, 10);
+    make_avail(wifi_rx_servicer_pid);
+
     // enable timer interrupts
     init_cpu_timer();
     while (1) {

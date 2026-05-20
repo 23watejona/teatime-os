@@ -6,7 +6,7 @@ extern char *alloc(unsigned int);
 #define RX_RING_N 8
 #define RX_BUF_SIZE 1600
 
-static struct lldesc *rx_ring;
+struct lldesc *rx_ring;
 
 void init_wifi_dma(void) {
     rx_ring = (struct lldesc *) alloc(sizeof(struct lldesc) * RX_RING_N);
