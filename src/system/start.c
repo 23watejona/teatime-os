@@ -34,12 +34,16 @@ extern int wifi_rx_servicer_pid;
 unsigned int intr_unmask(unsigned int);
 
 extern queue_entry *avail_list;
+extern unsigned int _bss_start, _bss_end;
 
 proctab_entry proctab[NUM_PROC] = {0};
 int curr_pid = 0;
 
 void start ( void )
 {
+    for (unsigned int *p = &_bss_start; p < &_bss_end; ++p)
+        *p = 0;
+
     _set_vec_base();
     BUSY_WAIT();
     init_cpu_clk(80);
