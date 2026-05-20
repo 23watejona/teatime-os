@@ -55,7 +55,7 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
     frame->address_regs.reg.a2 = (unsigned int) funcaddr;
     frame->address_regs.reg.a1 = (unsigned int) stack_addr;
     frame->address_regs.reg.a0 = (unsigned int) start_proc;
-    frame->intenable = 0x40; // 1 << 6 = clock interrupts enabled
+    frame->intenable = 0x41; // bit 6 = clock interrupt, bit 0 = WiFi MAC interrupt
     frame->sar = 0;
     frame->ps = 0;
     frame->epc1 = (unsigned int)start_proc;

@@ -79,7 +79,8 @@ void start ( void )
     wifi_rx_servicer_pid = create(wifi_rx_servicer, INIT_STK, 10);
     make_avail(wifi_rx_servicer_pid);
 
-    // enable timer interrupts
+    // enable timer + WiFi MAC (INUM 0) interrupts
+    intr_unmask(1u << 0);
     init_cpu_timer();
     while (1) {
         asm("waiti 0");
