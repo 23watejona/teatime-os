@@ -1,12 +1,12 @@
 void wait_us(unsigned int us) {
     unsigned int ticks = (us << 6) + (us << 4);
     unsigned int ccount_start;
-    unsigned int ccount_end;
     asm("rsr.ccount %0" : "=r" (ccount_start));
-    ccount_end = ccount_start + ticks;
-    while (({ 
+    // the iteration cap bounds the loop if ccount stops counting
+    for (unsigned int i = 0; i < 100000000u; ++i) {
         unsigned int ccount_cur;
         asm("rsr.ccount %0" : "=r" (ccount_cur));
-        ccount_cur;
-    }) < ccount_end);
+        if (ccount_cur - ccount_start >= ticks)
+            break;
+    }
 }

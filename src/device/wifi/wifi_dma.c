@@ -1,5 +1,6 @@
 #include "reg_util.h"
 #include "wifi_dma.h"
+#include "uart.h"
 
 extern char *alloc(unsigned int);
 
@@ -10,14 +11,22 @@ struct lldesc *rx_ring;
 
 void init_wifi_dma(void) {
     rx_ring = (struct lldesc *) alloc(sizeof(struct lldesc) * RX_RING_N);
+    if (!rx_ring) {
+        kprintf_uart("init_wifi_dma: rx_ring alloc failed\n");
+        return;
+    }
     for (int i = 0; i < RX_RING_N; i++) {
         rx_ring[i].size = RX_BUF_SIZE;
-        rx_ring[i].length = RX_BUF_SIZE;
+        rx_ring[i].length = 0;
         rx_ring[i].offset = 0;
         rx_ring[i].sosf = 0;
         rx_ring[i].eof = 0;
         rx_ring[i].owner = 1;
         rx_ring[i].buf_ptr = alloc(RX_BUF_SIZE);
+        if (!rx_ring[i].buf_ptr) {
+            kprintf_uart("init_wifi_dma: rx buf alloc failed\n");
+            return;
+        }
         rx_ring[i].next = &rx_ring[(i + 1) % RX_RING_N];
     }
 
@@ -25,8 +34,11 @@ void init_wifi_dma(void) {
     WRITE_REG(0x3ff2007c, (unsigned int) &rx_ring[RX_RING_N - 1]);
     WRITE_REG(0x3ff20088, 0);
     WRITE_REG(0x3ff20084, 0);
-    WRITE_REG(0x3ff2000c, 0);
     WRITE_REG(0x3ff20000, READ_REG(0x3ff20000) & 0xffffff00);
+    WRITE_REG(0x3ff20008, (unsigned int) &rx_ring[0]);
+    WRITE_REG(0x3ff2000c, 0);
+    WRITE_REG(0x3ff20010, 0);
+    WRITE_REG(0x3ff20000, READ_REG(0x3ff20000) & 0xdfffffff);
 }
 
 void lldesc_init_tx(struct lldesc *d, void *buf, unsigned int len) {

@@ -2,6 +2,8 @@
 #include "reg_util.h"
 #include "proc.h"
 #include "proc_queue.h"
+#include "wait.h"
+#include "wdt.h"
 
 #define NULL_STK 1024
 #define INIT_STK 2048
@@ -22,8 +24,10 @@ void init_wifi_iomux(void);
 void init_wifi_bb(void);
 void init_wifi_dma(void);
 void init_wifi_mac(void);
+void wifi_mac_rx_enable(void);
 void init_wifi_mac_addr(void);
-void wifi_set_channel(unsigned int);
+void init_wifi_rf(void);
+void wifi_set_channel(int);
 void startup_proc(void);
 void wifi_rx_servicer(void);
 void main(void);
@@ -63,14 +67,37 @@ void start ( void )
     make_avail(NULL_PROC);
 
     
+    // boot safe window: WDT-protected reflash interval before risky RF init
+    wdt_enable();
+    kprintf_uart("\n=== SAFE WINDOW 5s: flash/recover now ===\n");
+    for (int s = 5; s > 0; --s) {
+        kprintf_uart("%d ", s);
+        wdt_feed();
+        wait_us(1000000);
+    }
+    kprintf_uart("\nproceeding\n");
+
+    wdt_feed();
+    kprintf_uart("wifi: clk\n");
     init_wifi_clk();
+    kprintf_uart("wifi: pbus\n");
     init_wifi_pbus();
+    kprintf_uart("wifi: iomux\n");
     init_wifi_iomux();
-    init_wifi_bb();
+    wdt_feed();
+    kprintf_uart("wifi: rf\n");
+    init_wifi_rf();
+    kprintf_uart("wifi: dma\n");
     init_wifi_dma();
+    kprintf_uart("wifi: mac\n");
     init_wifi_mac();
+    kprintf_uart("wifi: mac_addr\n");
     init_wifi_mac_addr();
-    wifi_set_channel(1);
+    kprintf_uart("wifi: rx_enable\n");
+    wifi_mac_rx_enable();
+    WRITE_REG(0x3ff00000, 1);   // arm WiFi-MAC NMI source
+    kprintf_uart("wifi: done\n");
+    wdt_feed();
 
     int pid = create(main, INIT_STK, 5);
     kprintf_uart("created main as pid %d\n", pid);
@@ -79,8 +106,7 @@ void start ( void )
     wifi_rx_servicer_pid = create(wifi_rx_servicer, INIT_STK, 10);
     make_avail(wifi_rx_servicer_pid);
 
-    // enable timer + WiFi MAC (INUM 0) interrupts
-    intr_unmask(1u << 0);
+    // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
     init_cpu_timer();
     while (1) {
         asm("waiti 0");

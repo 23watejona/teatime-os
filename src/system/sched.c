@@ -9,8 +9,12 @@ extern queue_entry *avail_list;
 extern void make_avail(int pid);
 extern volatile unsigned int wifi_rx_pending;
 extern int wifi_rx_servicer_pid;
+extern int disable(void);
+extern void enable(int mask);
 
 void sched() {
+    int m = disable();
+
     if (wifi_rx_pending && wifi_rx_servicer_pid >= 0 &&
         proctab[wifi_rx_servicer_pid].status == PROC_IO_WAIT) {
         wifi_rx_pending = 0;
@@ -30,8 +34,10 @@ void sched() {
     
     // no need to context switch if it's the same process
     if (old_proc == new_proc) {
+        enable(m);
         return;
     }
 
     ctxsw(&old_proc->stk_ptr, &new_proc->stk_ptr);
+    enable(m);
 }

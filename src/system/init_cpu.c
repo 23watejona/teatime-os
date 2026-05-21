@@ -15,9 +15,11 @@ void set_uart0_div(unsigned int clk_rate_mhz, unsigned int baud_rate) {
 
 void set_magic_clk_reg (unsigned int val1, unsigned int val2) {
     WRITE_REG(0x60000d10, 103u | 1u << 8 | val1 << 0x10 | 0x1000000);
-    while ((READ_REG(0x60000d00 + 16) & 0x2000000) != 0);
+    for (unsigned int t = 0; (READ_REG(0x60000d00 + 16) & 0x2000000) && t < 100000u; t++)
+        ;
     WRITE_REG(0x60000d10, 103u | 2u << 8 | val2 << 0x10 | 0x1000000);
-    while ((READ_REG(0x60000d00 + 16) & 0x2000000) != 0);
+    for (unsigned int t = 0; (READ_REG(0x60000d00 + 16) & 0x2000000) && t < 100000u; t++)
+        ;
 }
 
 int init_cpu_clk(unsigned int clk_rate) {

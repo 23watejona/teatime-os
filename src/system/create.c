@@ -39,9 +39,17 @@ struct ctxsw_stack_frame {
 
 int create(void *funcaddr, unsigned int stack_size, int priority) {
     int pid = get_pid();
-    
-    // allocate stack and move the pointer to the beginning
-    unsigned int *stack_addr = ((unsigned int *)alloc_stack(stack_size)) + (stack_size >> 2);
+    if (pid < 0)
+        return -1;
+
+    char *stk = alloc_stack(stack_size);
+    if (!stk) {
+        proctab[pid].status = PROC_UNUSED;
+        return -1;
+    }
+
+    // move the pointer to the top of the stack
+    unsigned int *stack_addr = ((unsigned int *)stk) + (stack_size >> 2);
     
     // allocate space for stack frame
     stack_addr = (unsigned int *)((char *)(stack_addr) - sizeof(struct ctxsw_stack_frame));
@@ -55,7 +63,7 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
     frame->address_regs.reg.a2 = (unsigned int) funcaddr;
     frame->address_regs.reg.a1 = (unsigned int) stack_addr;
     frame->address_regs.reg.a0 = (unsigned int) start_proc;
-    frame->intenable = 0x41; // bit 6 = clock interrupt, bit 0 = WiFi MAC interrupt
+    frame->intenable = 0x40; // bit 6 = clock interrupt
     frame->sar = 0;
     frame->ps = 0;
     frame->epc1 = (unsigned int)start_proc;

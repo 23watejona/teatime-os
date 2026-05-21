@@ -34,7 +34,7 @@ static void rx_dump(volatile struct lldesc *d) {
 
 static void rx_refill(volatile struct lldesc *d) {
     d->size = RX_BUF_SIZE;
-    d->length = RX_BUF_SIZE;
+    d->length = 0;
     d->offset = 0;
     d->sosf = 0;
     d->eof = 0;

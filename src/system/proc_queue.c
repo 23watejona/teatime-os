@@ -10,6 +10,8 @@ queue_entry process_queues[NUM_QENT];
 static int curr_queue_id = NUM_PROC;
 
 queue_entry *new_queue() {
+    if (curr_queue_id + 1 >= NUM_QENT)
+        return NULL;
     int queue_head_id = curr_queue_id;
     int queue_tail_id = curr_queue_id + 1;
     queue_entry *queue_head = &process_queues[queue_head_id];
@@ -62,7 +64,11 @@ IRAM_ATTR void proc_remove(int pid) {
 
 int proc_dequeue(queue_entry *queue) {
     queue_entry *process_queue_entry = queue->next;
-    
+
+    // an empty queue yields the null process, so sched always has something to run
+    if (process_queue_entry->next == NULL)
+        return NULL_PROC;
+
     process_queue_entry->next->prev = process_queue_entry->prev;
     process_queue_entry->prev->next = process_queue_entry->next;
     

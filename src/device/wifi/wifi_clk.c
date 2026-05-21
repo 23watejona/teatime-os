@@ -15,7 +15,8 @@ void init_wifi_clk(void) {
     rtc.slp_val = rtc.slp_cnt_val + 0x3e8;
 
     rtc.analog_0 |= 0x00100000;
-    while ((rtc.status & 0x3) == 0) { }
+    for (unsigned int t = 0; (rtc.status & 0x3) == 0 && t < 100000u; t++)
+        ;
 
     rtc.timing[0] = 0x20302020;
     rtc.timing[1] = 0x20500000;

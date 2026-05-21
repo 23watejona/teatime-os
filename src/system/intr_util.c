@@ -4,6 +4,7 @@
 #include "uart.h"
 #include "reg_util.h"
 #include "timer.h"
+#include "wdt.h"
 
 unsigned int intr_enable(unsigned int mask);
 
@@ -28,9 +29,15 @@ void syscall_handler (unsigned int exccause, unsigned int int_cause) {
     unsigned int interrupt = 0;
     unsigned int intenable = 0;
     switch (exccause) {
-        case 0:
-            kprintf_uart("Illegal Instruction\n");
-            break;
+        default: {
+            // illegal instruction / unhandled exccause — not recoverable;
+            // reboot cleanly instead of fault-looping.
+            unsigned int epc;
+            asm("rsr.epc1 %0" : "=r"(epc));
+            kprintf_uart("\nFATAL exccause=%d epc1=%x -- rebooting\n",
+                         exccause, epc);
+            system_reboot();
+        }
         case 1:
             kprintf_uart("\nSyscall\n");
             kprintf_uart("Count: %d, intr: %d\n", frc1.count.data, frc1.intr.clear);
@@ -73,5 +80,12 @@ IRAM_ATTR void nmi_handler() {
 }
 
 unsigned int intr_unmask(unsigned int mask) {
-    return intr_enable(mask);    
+    // a level-triggered irq with no handler is never acked, so it storms the cpu
+    for (int i = 0; i < NUM_L1_INTR; ++i) {
+        if ((mask & (1u << i)) && !l1_interrupt_handlers[i]) {
+            kprintf_uart("intr_unmask: INUM %d has no handler -- masked\n", i);
+            mask &= ~(1u << i);
+        }
+    }
+    return intr_enable(mask);
 }
