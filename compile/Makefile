@@ -1,70 +1,66 @@
-BASE_DIR=..
-BUILD_DIR=$(BASE_DIR)/compile/build
-SRC_DIR=$(BASE_DIR)/src
+SRC_DIR=../src
 INCLUDE_DIR=$(SRC_DIR)/include
+BUILD_DIR=build
 
-CC=xtensa-lx106-elf-gcc 
-C_FLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-missing-braces -O0 -ffreestanding -fzero-initialized-in-bss
-LD=xtensa-lx106-elf-ld
-LD_FLAGS=-nostdlib -nostartfiles -T
-ASM=xtensa-lx106-elf-as
-ASM_FLAGS=--warn --fatal-warnings
+CROSS=xtensa-lx106-elf-
+CC=$(CROSS)gcc
+LD=$(CROSS)ld
+AS=$(CROSS)as
 
-# try $(wildcard)
-SRC_C=$(shell ./list_src.sh c)
-SRC_S=$(shell ./list_src.sh s)
-SRC_S_CAP=$(shell ./list_src.sh S)
+CFLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-missing-braces -O0 \
+       -ffreestanding -fzero-initialized-in-bss -I $(INCLUDE_DIR)
+LDFLAGS=-nostdlib -nostartfiles
+ASFLAGS=--warn --fatal-warnings -I $(INCLUDE_DIR)
 
+SRC_C=$(shell find $(SRC_DIR) -name '*.c')
+SRC_S=$(shell find $(SRC_DIR) -name '*.s')
+SRC_S_CAP=$(shell find $(SRC_DIR) -name '*.S')
 
-OBJ_C=$(SRC_C:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
-OBJ_S=$(SRC_S:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o)
-OBJ_S_CAP=$(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
-OBJ=$(OBJ_C) $(OBJ_S) $(OBJ_S_CAP)
-DEPENDS=$(OBJ_C:%.o=%.d)
+OBJ=$(SRC_C:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o) \
+    $(SRC_S:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o) \
+    $(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
+DEPENDS=$(OBJ:%.o=%.d)
 
 USB?=/dev/ttyUSB0
 ESPTOOL=esptool
-ESPELF=--chip esp8266 elf2image
-ESPFLASH=--port $(USB) write_flash
-ESPFLASHFLAGS=-fm qio 0x00000
 
-.PHONY: all flash clean
+.PHONY: default all flash monitor clean
+
 default: prog.bin
+
 all: flash monitor
 
 flash: prog.bin
-	$(ESPTOOL) $(ESPFLASH) $(ESPFLASHFLAGS) $<
+	$(ESPTOOL) --port $(USB) write_flash -fm qio 0x00000 $<
+
 monitor:
 	picocom $(USB) -b 76800
 
 prog.bin: prog.elf
 	@echo "Generating $@ from $<"
-	@$(ESPTOOL) $(ESPELF) $< -o $@
-	@echo "Renaming to $@"
+	@$(ESPTOOL) --chip esp8266 elf2image $< -o $@
 	@mv $@0x00000.bin $@
 
-prog.elf: $(OBJ)
-	@echo "Generating $@"
-	@$(LD) $(LD_FLAGS) prog.ld peri.ld $^ -o $@
+prog.elf: $(OBJ) prog.ld peri.ld
+	@echo "Linking $@"
+	@$(LD) $(LDFLAGS) -T prog.ld peri.ld $(OBJ) -o $@
 
-.SECONDEXPANSION:
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $$(@D)/
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"
-	@$(CC) -o $@ -I $(INCLUDE_DIR) -c $(C_FLAGS) $<
--include $(DEPENDS)
+	@mkdir -p $(@D)
+	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.s | $$(@D)/
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.s
 	@echo "Assembling $<"
-	@$(ASM) -o $@ -I $(INCLUDE_DIR) -c $(ASN_FLAGS) $<
+	@mkdir -p $(@D)
+	@$(AS) $(ASFLAGS) $< -o $@
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.S | $$(@D)/
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.S
 	@echo "Assembling $<"
-	@$(CC) -o $@ -I $(INCLUDE_DIR) -c $(ASN_FLAGS) $<
-
-$(BUILD_DIR)%/:
-	@echo "Generating build dir $@"
-	@mkdir -p $@
+	@mkdir -p $(@D)
+	@$(CC) -I $(INCLUDE_DIR) -c $< -o $@
 
 clean:
-	@rm $(OBJ) prog.bin prog.elf
+	@rm -rf $(BUILD_DIR) prog.bin prog.elf
+
+-include $(DEPENDS)
