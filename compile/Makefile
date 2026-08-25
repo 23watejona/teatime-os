@@ -25,9 +25,14 @@ DEPENDS=$(OBJ:%.o=%.d)
 USB?=$(shell ls /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART* /dev/tty.usbserial-* /dev/ttyUSB* 2>/dev/null | head -n1)
 ESPTOOL=esptool
 
-.PHONY: default all flash monitor clean
+.PHONY: default all flash monitor clean test
 
 default: prog.bin
+
+# Host-compiled crypto self-test (RFC/FIPS vectors); needs no hardware.
+test:
+	cc -std=c99 -Wall -I $(INCLUDE_DIR) ../tests/crypto_test.c $(SRC_DIR)/device/wifi/wifi_crypto.c -o build/crypto_test
+	./build/crypto_test
 
 all: flash monitor
 
