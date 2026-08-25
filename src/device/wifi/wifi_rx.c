@@ -1,3 +1,4 @@
+#include "wifi_sta.h"
 #include "timer.h"
 #include "def.h"
 #include "reg_util.h"
@@ -12,9 +13,7 @@
 
 extern void wifi_set_channel(unsigned int ch);
 extern void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen);
-extern unsigned char wifi_mac_addr[6];
-extern void wifi_station_tick(void);
-extern void wifi_sta_input(volatile unsigned char *buf, unsigned int len);
+extern void wifi_wpa_input(volatile unsigned char *buf, unsigned int len);
 
 int wifi_rx_servicer_pid = -1;
 
@@ -27,6 +26,7 @@ static void rx_dump(volatile struct lldesc *d) {
     volatile unsigned char *p = (volatile unsigned char *) d->buf_ptr + d->offset;
     wifi_ap_observe(p, d->length);
     wifi_sta_input(p, d->length);
+    wifi_wpa_input(p, d->length);
 }
 
 static void rx_refill(volatile struct lldesc *d) {

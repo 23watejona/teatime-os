@@ -8,8 +8,9 @@ LD=$(CROSS)ld
 AS=$(CROSS)as
 
 CFLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-missing-braces -O0 \
-       -ffreestanding -fzero-initialized-in-bss -I $(INCLUDE_DIR)
-LDFLAGS=-nostdlib -nostartfiles
+       -ffreestanding -fzero-initialized-in-bss -I $(INCLUDE_DIR) \
+       -ffunction-sections -fdata-sections
+LDFLAGS=-nostdlib -nostartfiles --gc-sections
 ASFLAGS=--warn --fatal-warnings -I $(INCLUDE_DIR)
 
 SRC_C=$(shell find $(SRC_DIR) -name '*.c')

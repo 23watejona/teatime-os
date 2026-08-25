@@ -1,8 +1,11 @@
 #include "ap_secrets.h"
 #include "timer.h"
+#include "reg_util.h"
 #include "uart.h"
 #include "wifi_tx.h"
 #include "wifi_sta.h"
+#include "wifi_wpa.h"
+#include "ap_secrets.h"
 
 extern int wifi_locked_channel;
 extern unsigned char wifi_mac_addr[6];
@@ -10,14 +13,42 @@ extern unsigned char wifi_mac_addr[6];
 #define AP_CHANNEL     6
 #define RETRY_PERIOD   24000000u   /* ~300 ms at 80 MHz */
 
-static const unsigned char ap_bssid[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-static const char ap_ssid[] = AP_SSID;
+const unsigned char ap_bssid[6] = { AP_BSSID_BYTES };
+const char ap_ssid[] = AP_SSID;
 
 volatile int wifi_sta_state;
 volatile unsigned int wifi_sta_aid;
 
 static unsigned int last_tx;
 static unsigned int seq;
+
+// with both address-match units masking every byte the mac acks nothing and the ap abandons the join, so one unit is pointed at our mac and one at the bssid with a full mask
+static void program_rx_filter(void) {
+    const unsigned char *m = wifi_mac_addr;
+    WRITE_REG(0x3ff20c48, m[0] | (m[1] << 8) | (m[2] << 16) | (m[3] << 24));
+    WRITE_REG(0x3ff20c4c, m[4] | (m[5] << 8));
+    WRITE_REG(0x3ff20c58, 0xffffffff);
+    WRITE_REG(0x3ff20c5c, 0x0000ffff);
+    WRITE_REG(0x3ff20c5c, READ_REG(0x3ff20c5c) | 0x00010000);
+
+    WRITE_REG(0x3ff20c3c, READ_REG(0x3ff20c3c) & 0xfffeffff);
+    WRITE_REG(0x3ff20c28, ap_bssid[0] | (ap_bssid[1] << 8) | (ap_bssid[2] << 16) | (ap_bssid[3] << 24));
+    WRITE_REG(0x3ff20c2c, ap_bssid[4] | (ap_bssid[5] << 8));
+    WRITE_REG(0x3ff20c38, 0xffffffff);
+    WRITE_REG(0x3ff20c3c, 0x0000ffff);
+    WRITE_REG(0x3ff20c3c, READ_REG(0x3ff20c3c) | 0x00010000);
+
+    // in sniffer mode the mac acks nothing and truncates data frames to the header, so the sniffer bits from bring-up are undone here
+    WRITE_REG_UNMASK(0x3ff20c18, 0x0000000c);
+    WRITE_REG_UNMASK(0x3ff20800, 0x03000000);
+    WRITE_REG_MASK(0x3ff20800, 0x00010000);
+    WRITE_REG_UNMASK(0x3ff20804, 0x03000000);
+    WRITE_REG_MASK(0x3ff20804, 0x00010000);
+    WRITE_REG_UNMASK(0x3ff20c88, 0x00040000);
+    WRITE_REG_MASK(0x3ff20c94, 0x00000001);
+    WRITE_REG_MASK(0x60009d44, 0x24000000);
+    WRITE_REG_MASK(0x3ff2006c, 0x00000007);
+}
 
 static unsigned int put_mgmt_hdr(unsigned char *b, unsigned int subtype) {
     unsigned int n = 0;
@@ -75,6 +106,8 @@ void wifi_station_tick(void) {
     switch (wifi_sta_state) {
     case STA_INIT:
         wifi_locked_channel = AP_CHANNEL;
+        program_rx_filter();
+        wpa_prep();                     /* slow PBKDF2 now, before msg1 is in flight */
         wifi_sta_state = STA_AUTH;
         last_tx = now - RETRY_PERIOD;   /* authenticate on the next tick */
         return;
@@ -144,6 +177,7 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
             wifi_sta_aid = aid;
             wifi_sta_state = STA_RUN;
             kprintf_uart("sta: ASSOCIATED aid=%u\n", aid);
+            wpa_begin();
         }
     }
 }
