@@ -14,33 +14,19 @@ extern void wifi_set_channel(unsigned int ch);
 extern void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen);
 extern unsigned char wifi_mac_addr[6];
 extern void wifi_station_tick(void);
+extern void wifi_sta_input(volatile unsigned char *buf, unsigned int len);
 
 int wifi_rx_servicer_pid = -1;
 
 // zero means keep hopping channels 1..13
 int wifi_locked_channel;
-unsigned int wifi_rx_frames;
-volatile unsigned int wifi_rx_directed_count;
 
 static volatile struct lldesc *rx_cursor;
 
-/* addr1 (DA) is at frame+4, past the 12-byte RxControl header */
-static int addressed_to_us(volatile unsigned char *p, unsigned int len) {
-    if (len < 12 + 10)
-        return 0;
-    volatile unsigned char *da = p + 12 + 4;
-    for (int i = 0; i < 6; i++)
-        if (da[i] != wifi_mac_addr[i])
-            return 0;
-    return 1;
-}
-
 static void rx_dump(volatile struct lldesc *d) {
     volatile unsigned char *p = (volatile unsigned char *) d->buf_ptr + d->offset;
-    wifi_rx_frames++;
-    if (addressed_to_us(p, d->length))
-        wifi_rx_directed_count++;
     wifi_ap_observe(p, d->length);
+    wifi_sta_input(p, d->length);
 }
 
 static void rx_refill(volatile struct lldesc *d) {
