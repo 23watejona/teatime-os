@@ -4,6 +4,9 @@
 #include "uart.h"
 
 void wifi_set_channel(unsigned int ch);
+void rf_regs_init(void);
+static void rx_analog_init(void);
+void rx_gain_init(unsigned int rxmax);
 void init_wifi_pbus(void);
 void init_wifi_bb(void);
 
@@ -19,10 +22,72 @@ void dpd_bypass(void) {
     rf_i2c_write_mask(119, 0, 15, 1, 1, 1);
 }
 
+void rf_off(void) {
+    WRITE_REG_RMW(0x60000594, 0xff0fffff, 0);
+    WRITE_REG_RMW(0x60000594, 0x03ffffff, 0);
+    WRITE_REG_RMW(0x600005e8, 0xfe7fffff, 0x00800000);
+    wait_us(1);
+    WRITE_REG_UNMASK(0x600005e8, 0x01800000);
+    rf_i2c_write(98, 1, 3, 0x01);
+    WRITE_REG_UNMASK(0x3ff20c70, 2);
+    WRITE_REG_UNMASK(0x3ff00018, 0x038f0000);
+    WRITE_REG(0x60000710, 0x50000000);
+}
+
+void rx_pbus_on(void) {
+    WRITE_REG_RMW(0x60000594, 0xff0fffff, 0x00300000);
+    WRITE_REG_RMW(0x60000594, 0x03ffffff, 0xd8000000);
+    WRITE_REG_RMW(0x600005e8, 0xfe7fffff, 0x00800000);
+    wait_us(1);
+    WRITE_REG_UNMASK(0x600005e8, 0x01800000);
+}
+
+void wifi_rf_on(void) {
+    WRITE_REG_RMW(0x60000d40, 0xfffffff3, 0x00000004);
+    WRITE_REG_MASK(0x3ff00018, 0x00100000);
+    WRITE_REG_MASK(0x3ff00018, 0x038f0000);
+    WRITE_REG(0x3ff20c14, 0x80000fff);
+    WRITE_REG_UNMASK(0x3ff20c74, 0x00c00000);
+
+    WRITE_REG_UNMASK(0x3ff20c70, 2);
+
+    rx_pbus_on();
+    rf_i2c_write(98, 1, 3, 0xf1);
+    rf_i2c_write(98, 1, 11, 0x80);
+
+    WRITE_REG(0x60000710, 0xfe000000);
+    WRITE_REG(0x60000744, 0);
+    WRITE_REG(0x60000700, 0x01000000);
+    WRITE_REG_UNMASK(0x600005c8, 0x00000300);
+
+    rf_i2c_write(101, 4, 0, 0xc6);
+    rf_i2c_write_mask(108, 2, 0, 0, 0, 1);
+
+    WRITE_REG_MASK(0x3ff00018, 0xffff0000);
+    WRITE_REG(0x60000710, 0xfe000000);
+    rf_regs_init();
+    wifi_set_channel(1);
+    rf_i2c_write(97, 1, 7, 0x51);
+    rx_analog_init();
+
+    rx_pbus_on();
+    WRITE_REG_MASK(0x3ff20c70, 2);
+
+    WRITE_REG_UNMASK(0x60009b08, 0x08000000);
+    WRITE_REG_MASK(0x60009b60, 1);
+    WRITE_REG_UNMASK(0x60009b60, 1);
+
+    rf_i2c_write(98, 1, 6, 0x08);
+    rf_i2c_write(98, 1, 9, 0x10);
+
+    if (READ_REG(0x3ff20c70) & 2)
+        rx_path_enable();
+}
+
 void rc_calibrate(void) {
     kprintf_uart("      rc:w1\n");
     rf_i2c_write_mask(106, 2, 0, 5, 4, 0);
-    rf_i2c_write_mask(106, 2, 4, 7, 4, 2);
+    rf_i2c_write_mask(106, 2, 4, 7, 4, 1);
     rf_i2c_write_mask(104, 3, 1, 0, 0, 1);
     rf_i2c_write_mask(106, 2, 6, 4, 0, 8);
     rf_i2c_write_mask(106, 2, 4, 0, 0, 1);
@@ -37,7 +102,7 @@ void rc_calibrate(void) {
     rf_i2c_write_mask(104, 3, 1, 0, 0, 0);
     kprintf_uart("      rc:done\n");
 
-    int rc_a = (signed char)((11 * (int)v - 14) / 20);
+    int rc_a = (signed char)((16 * (int)v - 39) / 30);
     int rc_b = (signed char)((((unsigned char)((unsigned short)(28 * v) / 9)) + 2) >> 2);
 
     rf_i2c_write(97,  1, 2, (rc_a | 0xa0) & 0xff);
@@ -45,7 +110,7 @@ void rc_calibrate(void) {
 }
 
 static void sar_init(void) {
-    WRITE_REG_MASK(0x60000710, 0x00000002);
+    WRITE_REG_MASK(0x60000710, 0x02000000);
     rf_i2c_write_mask(108, 2, 0, 4, 4, 1);
     rf_i2c_write_mask(108, 2, 1, 1, 0, 2);
 }
@@ -98,15 +163,29 @@ void pbus_tx_power_off(void) {
 }
 
 void pbus_work_mode(void) {
-    /* clear bit0 -- the pbus debug-enable that pbus_debug_mode set. */
     WRITE_REG_UNMASK(0x60000594, 1);
-    WRITE_REG_UNMASK(0x60009b08, 0x00000008);
+    WRITE_REG_UNMASK(0x60009b08, 0x08000000);
 }
 
+extern unsigned int pbus_rd(unsigned int reg, unsigned int width);
+
+// blocks until the pbus reports ready, so a following force-test can't land on a not-yet-ready bus
 void pbus_debug_mode(void) {
-    /* assumes pbus idle at cold boot; busy-drain path not ported */
-    WRITE_REG_MASK(0x60009b08, 0x00000008);
+    unsigned int v = READ_REG(0x60000594);
+    if ((v & 1) == 0 && (READ_REG(0x3ff20c70) & 2)) {
+        for (unsigned int g = 0; g < 100000u; g++) {
+            wait_us(5);
+            if ((pbus_rd(2, 1) & 0x184) == 0x184 && (pbus_rd(3, 2) & 6) == 6)
+                break;
+        }
+    }
+    WRITE_REG_MASK(0x60009b08, 0x08000000);
     WRITE_REG_MASK(0x60000594, 1);
+    if (READ_REG(0x3ff20c70) & 2) {
+        for (unsigned int t = 0; t < 100000u; t++)
+            if (READ_REG(0x600005a0) & 0x40000000)
+                break;
+    }
 }
 
 static void rx_max_gain_analog(void) {
@@ -129,13 +208,35 @@ static void rx_analog_init(void) {
     rx_max_gain_analog();
 }
 
+void rx_chan_compensate(unsigned int ch, int level) {
+    int base = (ch >= 7 && ch <= 13) ? ((int)(ch - 6) / 5 - 7) : -7;
+    int a = 0, b = 0, c = 0;
+    if (level == 1) { a = -6; b = -6; c = -6; }
+    int v;
+    if (ch < 7)        v = (b - a) * ((int)ch - 1) / 5 + a;
+    else if (ch <= 13) v = (c - b) * ((int)ch - 6) / 5 + b;
+    else               v = (c - b) * ((int)ch - 2) / 5 + b;
+    unsigned char cmp = (unsigned char)(base + (unsigned char)v);
+    WRITE_REG_RMW(0x60009d68, 0xfffc03ff, (unsigned int)cmp << 10);
+    WRITE_REG_MASK(0x60009a34, 1);
+    WRITE_REG_UNMASK(0x60009a34, 1);
+}
+
+void rx_max_gain_digital(unsigned int ch, int level) {
+    if (level)
+        WRITE_REG_UNMASK(0x60000590, 0x10);
+    else
+        WRITE_REG_RMW(0x60000590, 0xffffffef, 0x10);
+    rx_chan_compensate(ch, level);
+}
+
 void rf_init(void) {
     WRITE_REG_MASK(0x3ff00018, 0xffff0000);
 
     WRITE_REG(0x60000700, 0x0019c06a);
     WRITE_REG(0x60000710, 0xf0000000);
     WRITE_REG_UNMASK(0x600005e8, 0x01800000);
-    WRITE_REG_UNMASK(0x600005e8, 0x00000008);
+    WRITE_REG_UNMASK(0x600005e8, 0x08000000);
     WRITE_REG_MASK(0x60000710, 0x02000000);
 
     WRITE_REG_MASK(0x60000710, 0x30000000);
@@ -179,13 +280,12 @@ static void tx_dc_offset_apply(unsigned int val16, const signed char *tbl) {
     }
 }
 
-/* DC-offset measurement engine. */
 #define MCAL_REG       0x60000d4c
 #define MCAL_ARM       0x01113cf1
 #define MCAL_TRIGGER   0x01113cf3
 #define MCAL_STOP      0x01113cf0
-#define MCAL_DONE      0x00000001
-#define MCAL_IFLAG     0x00000040   /* bit6: I-axis servo direction */
+#define MCAL_DONE      0x01000000
+#define MCAL_QFLAG     0x40000000
 #define DC_CAL_SAMPLES 12u
 #define DC_CAL_AVG     4u
 #define DC_POLL_CAP    100000u
@@ -196,7 +296,6 @@ static int dc_clamp_s8(int v) {
     return v;
 }
 
-/* one gain-step SAR DC measurement; binary-search step from 0x1c, I/Q init 0x40. */
 static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
     int acc_i = 0, acc_q = 0;
     int prev_i = 0x40, prev_q = 0x40;
@@ -217,15 +316,16 @@ static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
                 break;
 
         unsigned int s = READ_REG(MCAL_REG);
+        unsigned int s2 = READ_REG(MCAL_REG); // read twice on purpose: the first read's sign steers i, the second read's q flag steers q
         int st = (signed char)step;
 
-        if ((int)s < 0) prev_q -= st;
-        else            prev_q += st;
-        prev_q = dc_clamp_s8(prev_q);
-
-        if (!(s & MCAL_IFLAG)) prev_i += st;
-        else                   prev_i -= st;
+        if ((int)s < 0) prev_i -= st;
+        else            prev_i += st;
         prev_i = dc_clamp_s8(prev_i);
+
+        if (s2 & MCAL_QFLAG) prev_q -= st;
+        else                 prev_q += st;
+        prev_q = dc_clamp_s8(prev_q);
 
         step = (st == 2) ? 1 : (st >> 1) + 1;
 
@@ -247,30 +347,44 @@ static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
     out[1] = (signed char)acc_q;
 }
 
-/* writes live-measured I/Q codes. */
+static unsigned int tx_gain_to_dc_index(unsigned int g) {
+    static const unsigned char csw154[21] = {
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 3
+    };
+    unsigned int i = (g - 4) & 0xff;
+    return (i > 16) ? 1u : csw154[i];
+}
+
+// the tx gain hasn't been written yet at this point, so the dc offset is calibrated against its power-on default
+#define TX_RF_ANA_GAIN 0x0bf0u
+
 static void tx_dc_offset_calibrate(void) {
     static const unsigned char gain_tbl[4] = {0x04, 0x10, 0x12, 0x14};
-    signed char dc[2];
-    signed char applied[2];
-    int sum_i = 0, sum_q = 0;
+    signed char pairs[4][2];
 
     pbus_debug_mode();
     pbus_force(1, 1, 31);
 
-    for (unsigned int g = 0; g < 4; g++) {
-        tx_dc_offset_measure(gain_tbl[g], dc);
-        sum_i += dc[0];
-        sum_q += dc[1];
-    }
+    for (unsigned int g = 0; g < 4; g++)
+        tx_dc_offset_measure(gain_tbl[g], pairs[g]);
 
-    applied[0] = (signed char)((sum_i + 2) >> 2);
-    applied[1] = (signed char)((sum_q + 2) >> 2);
-    tx_dc_offset_apply(0, applied);
+    unsigned int idx = tx_gain_to_dc_index(TX_RF_ANA_GAIN & 0x1f);
+    if (idx > 3) idx = 3;
+    signed char sel[2];
+    sel[0] = pairs[idx][0];
+    sel[1] = pairs[idx][1];
+    pbus_force(0, 2, (unsigned int)(unsigned char)sel[0]);
+    pbus_force(1, 2, (unsigned int)(unsigned char)sel[1]);
+
+    tx_dc_offset_apply(TX_RF_ANA_GAIN, sel);
+    kprintf_uart("dcoff: p0=%d,%d p1=%d,%d p2=%d,%d p3=%d,%d sel[%d]=%d,%d\n",
+                 pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1],
+                 pairs[2][0], pairs[2][1], pairs[3][0], pairs[3][1],
+                 idx, sel[0], sel[1]);
 
     pbus_work_mode();
 }
 
-/* noise floor -> 0x60009b64, ctrl -> 0x60009b60. */
 static void noise_floor_set(int nf) {
     WRITE_REG_UNMASK(0x60009b60, 2);
     int v = nf + 1;
@@ -328,37 +442,43 @@ static void noise_init(void) {
 
     int nf[4];
     nf[0] = nf[1] = nf[2] = nf[3] = -340;
-    unsigned int s60 = READ_REG(0x60009b60);
+    unsigned int s2c = READ_REG(0x60009a2c);
     unsigned int s20 = READ_REG(0x60009d20);
     unsigned int s40 = READ_REG(0x60009d40);
 
-    WRITE_REG_UNMASK(0x60009b60, 2);
-    WRITE_REG_UNMASK(0x60009d40, 0x40000000);
+    WRITE_REG_UNMASK(0x60009a2c, 1);
+    WRITE_REG_UNMASK(0x60009d20, 0x40000000);
     wifi_set_channel(1);
 
     int ok = 0;
     for (int g = 0; g < 4; g++) {
-        if (noise_floor_measure(1)) {
-            WRITE_REG_UNMASK(0x60009b60, 2);
-            break;
+        if (!noise_floor_measure(1)) {
+            ok = 1;
+            int s = noise_floor_clamped();
+            if (s < nf[g])
+                nf[g] = s;
         }
-        ok = 1;
-        int s = noise_floor_clamped();
-        if (s < nf[g])
-            nf[g] = s;
+        WRITE_REG_UNMASK(0x60009b60, 2);
     }
 
-    WRITE_REG(0x60009b60, s60);
+    WRITE_REG(0x60009a2c, s2c);
     WRITE_REG(0x60009d20, s20);
     WRITE_REG(0x60009d40, s40);
 
-    int mn = -388;
     if (ok) {
-        mn = nf[0];
+        int mn = nf[0];
         for (int i = 1; i < 4; i++)
             if (nf[i] < mn) mn = nf[i];
+        if (mn > -40) mn = -40;
+        noise_floor_set(mn);
     }
-    noise_floor_set(mn);
+}
+
+int live_rssi(void) {
+    WRITE_REG_UNMASK(0x60009b60, 2);
+    noise_floor_measure(1);
+    int v = (int)(READ_REG(0x60009824) & 0xfff) - 0xfff;
+    return (v << 15) >> 16;
 }
 
 void bb_bringup(void) {
@@ -379,9 +499,6 @@ void bb_bringup(void) {
 }
 
 void antenna_switch_init(void) {
-    /* single-antenna board: chip6_phy_init_ctrl[34]&~2==1 antenna map. */
-    WRITE_REG(0x60009d60, 0x01010101);
-    WRITE_REG(0x60009d64, 0x01010104);
     WRITE_REG_MASK(0x60009b00, 0x00800000);
     WRITE_REG_RMW(0x60009b08, 0xffffc3ff, 0x00000800);
     WRITE_REG(0x60009a28, 2);
@@ -391,73 +508,79 @@ void bbpll_calibrate(unsigned int slow) {
     unsigned int saved = READ_REG(0x3ff00014);
     WRITE_REG(0x3ff00014, saved & 0xfffffffe);
     wait_us(1);
-    WRITE_REG_RMW(0x60000d40, 0xfffffff2, 8);
+    WRITE_REG_RMW(0x60000d40, 0xfffffff3, 8);
     wait_us(slow ? 1000 : 100);
-    WRITE_REG_RMW(0x60000d40, 0xfffffff2, 4);
+    WRITE_REG_RMW(0x60000d40, 0xfffffff3, 4);
     wait_us(1);
     WRITE_REG(0x3ff00014, saved);
 }
 
-/* saves 0x60009a2c, masks digital RX off (bit19). */
 unsigned int rx_digital_stop(void) {
     unsigned int saved = READ_REG(0x60009a2c);
-    WRITE_REG_MASK(0x60009b08, 8);
+    WRITE_REG_MASK(0x60009b08, 0x08000000);
     WRITE_REG_UNMASK(0x60009a2c, 0x00080000);
     return saved;
 }
 
-/* pulse 0x60009b60 bit0, restore saved 0x60009a2c. */
 void rx_digital_start(unsigned int a2c_saved) {
-    WRITE_REG_UNMASK(0x60009b08, 8);
+    WRITE_REG_UNMASK(0x60009b08, 0x08000000);
     WRITE_REG_MASK(0x60009b60, 1);
     WRITE_REG_UNMASK(0x60009b60, 1);
     WRITE_REG(0x60009a2c, a2c_saved);
 }
 
-/* clear 0x60009b00 bit28 (enable AGC/CCA). */
 void agc_enable(void) {
     WRITE_REG_UNMASK(0x60009b00, 0x10000000);
 }
 
-/* set 0x60009b00 bit28 (disable AGC/CCA). */
 void agc_disable(void) {
     WRITE_REG_MASK(0x60009b00, 0x10000000);
 }
 
-/* BB RX clock via RF-I2C 119/28 bit5, 124/21 bit1. */
 void rx_clock_enable(unsigned int en) {
     rf_i2c_write_mask(119, 0, 28, 5, 5, en);
     rf_i2c_write_mask(124, 1, 21, 1, 1, en);
 }
 
-/* force powerup option 3 (full RF cal) in 0x6000073c. */
 static void powerup_option_set(void) {
     WRITE_REG(0x6000073c, 3);
 }
 
+// there is no second-stage bootloader to set this analog default, so it is set here or rx evm degrades
+static void analog_reg_default(void) {
+    WRITE_REG_MASK(0x60000d48, 1);
+    WRITE_REG_UNMASK(0x60000d48, 1);
+    unsigned int e = READ_REG(0x3ff00058);
+    WRITE_REG(0x60009d74, (((e >> 12) & 0xa) == 0xa) ? 0xe690a568 : 0xeab4d027);
+}
+
 void init_wifi_rf(void) {
+    kprintf_uart("  rf: analog_reg_default\n");
+    analog_reg_default();
     kprintf_uart("  rf: powerup_option_set\n");
     powerup_option_set();
+    // must run before rf init
+    kprintf_uart("  rf: antenna_switch_init\n");
+    antenna_switch_init();
     kprintf_uart("  rf: rf_init\n");
     rf_init();
     kprintf_uart("  rf: bb_bringup\n");
     bb_bringup();
-    kprintf_uart("  rf: antenna_switch_init\n");
-    antenna_switch_init();
-    /* BBPLL freq config: block 103 reg4 [4:0]=0x13. */
     rf_i2c_write_mask(103, 4, 4, 4, 0, 0x13);
+    kprintf_uart("  rf: rx_digital_stop\n");
+    unsigned int dig = rx_digital_stop();
     kprintf_uart("  rf: bbpll_calibrate\n");
     bbpll_calibrate(0);
+    // the rx path wants the bb rx clock off, so it is explicitly left at its reset default
     kprintf_uart("  rf: rx_clock_enable\n");
-    rx_clock_enable(1);
+    rx_clock_enable(0);
     kprintf_uart("  rf: rx_path_enable\n");
     rx_path_enable();
     kprintf_uart("  rf: rx_digital_start\n");
-    rx_digital_start(rx_digital_stop());
+    rx_digital_start(dig);
     kprintf_uart("  rf: agc_enable\n");
     agc_enable();
 
-    /* arm the BB noise-floor machine; steady-state RX keeps it active. */
     WRITE_REG_UNMASK(0x60009b60, 2);
     noise_floor_start(1);
 }

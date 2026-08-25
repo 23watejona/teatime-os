@@ -48,6 +48,4 @@ void init_wifi_mac_addr(void) {
     unsigned int hi = mac[4] | (mac[5] << 8);
     WRITE_REG(0x3ff20c48, lo);
     WRITE_REG(0x3ff20c4c, hi);
-    WRITE_REG(0x3ff20c58, 0xffffffff);
-    WRITE_REG(0x3ff20c5c, 0x0000ffff);
 }

@@ -1,6 +1,12 @@
 #ifndef TIMER_H
 #define TIMER_H
 
+static inline unsigned int ccount(void) {
+    unsigned int c;
+    asm volatile("rsr.ccount %0" : "=r"(c));
+    return c;
+}
+
 struct frc1_t {
     struct {
         unsigned int data: 23;

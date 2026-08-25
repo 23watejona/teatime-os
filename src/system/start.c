@@ -87,15 +87,15 @@ void start ( void )
     wdt_feed();
     kprintf_uart("wifi: rf\n");
     init_wifi_rf();
-    kprintf_uart("wifi: dma\n");
-    init_wifi_dma();
     kprintf_uart("wifi: mac\n");
     init_wifi_mac();
     kprintf_uart("wifi: mac_addr\n");
     init_wifi_mac_addr();
+    // WiFi NMI source left disarmed: it fires correctly on RX events, but the NMI
+    // frame handler (ctxsw.s) faults on entry, so the RX servicer polls instead.
+    WRITE_REG(0x3ff00000, READ_REG(0x3ff00000) & 0xffffffe0);
     kprintf_uart("wifi: rx_enable\n");
     wifi_mac_rx_enable();
-    WRITE_REG(0x3ff00000, 1);   // arm WiFi-MAC NMI source
     kprintf_uart("wifi: done\n");
     wdt_feed();
 

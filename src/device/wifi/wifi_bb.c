@@ -4,9 +4,9 @@
 extern void pbus_debug_mode(void);
 extern void pbus_work_mode(void);
 extern void pbus_force(unsigned int a, unsigned int b, unsigned int c);
-extern void agc_disable(void);
+extern void rx_max_gain_digital(unsigned int ch, int level);
+extern unsigned int g_wifi_channel;
 
-/* register-op order is load-bearing. */
 void init_wifi_bb(void) {
     WRITE_REG_MASK(0x60009b60, 0x00001400);
     WRITE_REG_MASK(0x60009b0c, 0x10000000);
@@ -14,10 +14,10 @@ void init_wifi_bb(void) {
     WRITE_REG(0x60009b6c, 0x0914bc81);
     WRITE_REG(0x60009b68, 0x5ac64198);
     WRITE_REG_UNMASK(0x60009b50, 0x80000000);
+    asm volatile("memw");
     WRITE_REG(0x60009d18, 400);
     WRITE_REG_RMW(0x600098ec, 0xfc00ffff, 0x01900000);
     WRITE_REG_UNMASK(0x60009988, 0x04000000);
-    /* 0x60009b48 low-7 = rx max gain; 0x46 = rx_gain_init default. */
     WRITE_REG_RMW(0x60009b48, 0xffffff80, 0x46);
     WRITE_REG_RMW(0x60009b28, 0x00ffffff, 0x18000000);
     WRITE_REG_UNMASK(0x60009a34, 0x7f000000);
@@ -28,6 +28,7 @@ void init_wifi_bb(void) {
     WRITE_REG_RMW(0x60009b64, 0xfffff000, 0x00000fa6);
     WRITE_REG_RMW(0x60009b5c, 0xffc00000, 0x00385854);
     WRITE_REG_RMW(0x60009b50, 0xf00fff00, 0x0b2000e6);
+    asm volatile("memw");
     WRITE_REG(0x60009d18, 0x80);
     WRITE_REG_MASK(0x60009d10, 4);
     WRITE_REG_RMW(0x60009d70, 0xdffff03f, 0x20000c40);
@@ -39,12 +40,16 @@ void init_wifi_bb(void) {
     WRITE_REG_RMW(0x3ff20c70, 0xff0bffff, 0x00240000);
     WRITE_REG_UNMASK(0x60009d44, 0x00400000);
 
-    /* TODO(rxgain): rx_max_gain_digital omitted; needs the per-channel RX ctrl table. */
-    agc_disable();
+    rx_max_gain_digital(g_wifi_channel, 0);
+
+    WRITE_REG_RMW(0x60009c28, 0xfffe03ff, 0);
+    WRITE_REG_RMW(0x60009d24, 0xffffff01, 0);
 
     WRITE_REG_RMW(0x60009838, 0xffffffcf, 0x20);
+    asm volatile("memw");
     WRITE_REG(0x60009c48, 0x00800083);
     WRITE_REG_MASK(0x60009c4c, 6);
+    WRITE_REG(0x60009d1c, 0x00000fff);
     WRITE_REG_MASK(0x60009d1c, 0x00000fff);
     WRITE_REG_UNMASK(0x60009a28, 0x00000800);
     WRITE_REG_RMW(0x3ff00024, 0xfffffff9, 2);
@@ -52,7 +57,6 @@ void init_wifi_bb(void) {
 
     pbus_debug_mode();
     pbus_force(1, 1, 0xc);
-    /* pbus_force(2,1,0x184)/(3,2,6) gated on rx_table_renew_en (zero here), so omitted. */
     pbus_work_mode();
     rx_gain_init(3);
     rx_filter_select(3);

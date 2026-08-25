@@ -1,31 +1,141 @@
 #include "reg_util.h"
+#include "wait.h"
+
+extern void init_wifi_dma(void);
+extern void wifi_rf_on(void);
+extern void rf_off(void);
 
 #define MAC_EVENT_MASK 0x00030000
 
-/* MAC event-interest mask for 0x3ff20c18. */
 #define WDEV_INTEREST_EVENT 0x2c880300
+#define WDEV_SNIFFER_EVENT  0x0000000c
 
-/* crypto key table + option-init omitted. */
+static void mac_options_init(void) {
+    WRITE_REG_MASK(0x3ff20c88, 0x8084a000);
+    WRITE_REG_RMW(0x3ff20c88, 0xffdfbff7, 0);
+    WRITE_REG_MASK(0x3ff20c90, 0x00000008);
+    WRITE_REG_MASK(0x3ff20c94, 0x00000003);
+    WRITE_REG_RMW(0x3ff20e08, 0xffffff0f, 0);
+    unsigned int v = READ_REG(0x3ff20c68);
+    WRITE_REG_RMW(0x3ff20c68, 0xff00ffff, (((v >> 16) + 18) & 0xff) << 16);
+    WRITE_REG_RMW(0x3ff20c6c, 0xffffff00, 0x16);
+    WRITE_REG_RMW(0x3ff20c6c, 0xffff00ff, 0x1600);
+    WRITE_REG_RMW(0x3ff20c14, 0xfffff000, 0x0f0);
+    WRITE_REG_MASK(0x3ff20c14, 0x80000000);
+    WRITE_REG_MASK(0x3ff20c14, 0x40000000);
+}
+
+static void key_table_init(void) {
+    WRITE_REG(0x3ff21400, 0xffffffff);
+    WRITE_REG(0x3ff21404, 0x00ccffff);
+    WRITE_REG(0x3ff21408, 0xffffffff);
+    WRITE_REG_RMW(0x3ff2140c, 0xffff0000, 0x0000ffff);
+    WRITE_REG_MASK(0x3ff2080c, 0x00000001);
+    WRITE_REG(0x3ff21428, 0xffffffff);
+    WRITE_REG(0x3ff2142c, 0x01ccffff);
+    WRITE_REG(0x3ff21430, 0xffffffff);
+    WRITE_REG_RMW(0x3ff21434, 0xffff0000, 0x0000ffff);
+    WRITE_REG_MASK(0x3ff2080c, 0x00000002);
+}
+
 void init_wifi_mac(void) {
     WRITE_REG(0x3ff20c18, 0);
     WRITE_REG(0x3ff20c24, 0xffffffff);
+    mac_options_init();
     WRITE_REG(0x3ff20800, MAC_EVENT_MASK);
     WRITE_REG(0x3ff20804, MAC_EVENT_MASK);
+    key_table_init();
     WRITE_REG(0x3ff20808, 0);
+    init_wifi_dma();
     WRITE_REG(0x3ff20400, 0x76503210);
     WRITE_REG(0x3ff20404, 0xbbbbbbbb);
     WRITE_REG(0x3ff20408, 0xbbbbbbbb);
     WRITE_REG_MASK(0x3ff2006c, 0x707);
     WRITE_REG_UNMASK(0x3ff2006c, 0x00000010);
     WRITE_REG_UNMASK(0x3ff2006c, 0x00001000);
-    WRITE_REG_UNMASK(0x3ff2006c, 0x00000007);
+    WRITE_REG_UNMASK(0x3ff20c3c, 0x00010000);
+    WRITE_REG_UNMASK(0x3ff20c44, 0x00010000);
     WRITE_REG(0x3ff20c18, WDEV_INTEREST_EVENT);
+    WRITE_REG_MASK(0x3ff20178, 2);
+    WRITE_REG_UNMASK(0x3ff20004, 0x80000000);
 }
 
-/* Post-init RX open: drop BSSID filter, set MAC RX-enable bit31 of 0x3ff20004. */
+static void mac_filter_accept_all(void) {
+    WRITE_REG(0x3ff20c48, 0xffffffff);
+    WRITE_REG(0x3ff20c4c, 0x0000ffff);
+    WRITE_REG(0x3ff20c5c, 0x0001ffff);
+    WRITE_REG(0x3ff20c58, 0xffffffff);
+    WRITE_REG(0x3ff20c28, 0xffffffff);
+    WRITE_REG(0x3ff20c2c, 0x0000ffff);
+    WRITE_REG(0x3ff20c38, 0xffffffff);
+    WRITE_REG_MASK(0x3ff2006c, 1);
+    WRITE_REG_MASK(0x3ff2006c, 2);
+}
+
 void wifi_mac_rx_enable(void) {
+    rf_off();
+    wait_us(2000);
+    wifi_rf_on();
+
+    mac_filter_accept_all();
+    WRITE_REG_UNMASK(0x3ff2006c, 0x00000001);
+    WRITE_REG_UNMASK(0x3ff2006c, 0x00000002);
+    WRITE_REG_UNMASK(0x3ff2006c, 0x00000004);
+
+    WRITE_REG_MASK(0x3ff20c88, 0x00040000);
+    WRITE_REG_MASK(0x3ff20800, 0x03000000);
+    WRITE_REG_UNMASK(0x3ff20800, 0x00010000);
+    WRITE_REG_MASK(0x3ff20804, 0x03000000);
+    WRITE_REG_UNMASK(0x3ff20804, 0x00010000);
+
+    WRITE_REG(0x3ff20c58, 0);
+    WRITE_REG(0x3ff20c5c, 0x00010000);
+    WRITE_REG(0x3ff20c38, 0);
     WRITE_REG(0x3ff20c3c, 0x00010000);
-    WRITE_REG(0x3ff20c44, 0x00000000);
-    WRITE_REG_MASK(0x3ff20178, 2);
+
+    WRITE_REG(0x3ff20c18, WDEV_INTEREST_EVENT | WDEV_SNIFFER_EVENT);
+
+    WRITE_REG_UNMASK(0x60009d44, 0x24000000);
+    wait_us(15000);
+    WRITE_REG_UNMASK(0x3ff20c94, 0x00000001);
+
     WRITE_REG_MASK(0x3ff20004, 0x80000000);
+
+    WRITE_REG(0x6000983c, 0x00000012);
+    WRITE_REG(0x60009860, 0x02230001);
+    WRITE_REG_UNMASK(0x60009864, 0x00000100);
+    WRITE_REG(0x60009884, 0x00018000);
+    WRITE_REG(0x6000989c, 0x00018000);
+    WRITE_REG(0x600098a0, 0xf1ac6667);
+    WRITE_REG(0x600098d4, 0x00000001);
+    WRITE_REG(0x600099ac, 0x00000005);
+    WRITE_REG(0x600099b0, 0x00000001);
+    WRITE_REG_MASK(0x60009a28, 0x00000020);
+    WRITE_REG(0x60009ab4, 0x00e6fffd);
+    WRITE_REG(0x60009ab8, 0x00000006);
+    WRITE_REG(0x60009abc, 0x01800001);
+    WRITE_REG(0x60009b4c, 0x013c0000);
+    WRITE_REG(0x60009c44, 0x00000000);
+    WRITE_REG(0x60009d0c, 0x0000000a);
+
+    for (unsigned int a = 0x60000504; a <= 0x60000560; a += 4)
+        WRITE_REG(a, 0x0003e4f3);
+    WRITE_REG(0x600005b0, 0x043a0000);
+    WRITE_REG(0x600005b8, 0x00034008);
+    WRITE_REG_MASK(0x600005c8, 0x00000100);
+    WRITE_REG_UNMASK(0x60000d20, 0x02000000);
+    WRITE_REG(0x600005fc, 0x000c0b0a);
+    WRITE_REG(0x60000708, 0x00200000);
+    WRITE_REG_UNMASK(0x60000d40, 0x10000000);
+    WRITE_REG_MASK(0x60000d50, 0x80000000);
+    WRITE_REG_MASK(0x60000d5c, 0x80000000);
+    WRITE_REG(0x60000d60, 0x00000003);
+    WRITE_REG(0x60000d80, 0x00000661);
+    WRITE_REG(0x60000d84, 0x000005c5);
+    WRITE_REG(0x60000d88, 0x000005c5);
+    WRITE_REG(0x60000d8c, 0x000005c5);
+    WRITE_REG(0x60000d90, 0x00000435);
+    WRITE_REG(0x60000d94, 0x00000435);
+    WRITE_REG(0x60000d98, 0x00000661);
+    WRITE_REG(0x60000d9c, 0x00000663);
 }

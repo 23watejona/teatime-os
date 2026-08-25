@@ -1,18 +1,17 @@
+#include "timer.h"
 #include "def.h"
-#include "uart.h"
 #include "reg_util.h"
-#include "proc.h"
-#include "proc_queue.h"
 #include "wifi_dma.h"
 
-#define MAC_DMA_RX_TAIL 0x3ff2007c
-#define RX_BUF_SIZE 1600
+// RX_CURRENT is read-only and shows where the dma is, so the software head goes into RX_HEAD only when the dma isn't on it
+#define MAC_DMA_RX_HEAD     0x3ff20008
+#define MAC_DMA_RX_CURRENT  0x3ff2001c
 
-extern void make_avail(int pid);
-extern void sched(void);
-extern int disable(void);
-extern void enable(int mask);
-extern volatile unsigned int wifi_rx_pending;
+/* Channel dwell: ~400 ms at 80 MHz, a few beacon intervals. */
+#define CHAN_DWELL_CYCLES   32000000u
+
+extern void wifi_set_channel(unsigned int ch);
+extern void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen);
 
 int wifi_rx_servicer_pid = -1;
 
@@ -20,52 +19,46 @@ static volatile struct lldesc *rx_cursor;
 
 static void rx_dump(volatile struct lldesc *d) {
     volatile unsigned char *p = (volatile unsigned char *) d->buf_ptr + d->offset;
-    unsigned int len = d->length;
-    unsigned int fc = p[0] | (p[1] << 8);
-    kprintf_uart("rx: len=%d fc=%x type=%d subtype=%d\n",
-                 len, fc, (fc >> 2) & 3, (fc >> 4) & 0xf);
-    for (unsigned int i = 0; i < len; i++) {
-        kprintf_uart("%x ", p[i]);
-        if ((i & 0xf) == 0xf)
-            kputc_uart('\n');
-    }
-    kputc_uart('\n');
+    wifi_ap_observe(p, d->length);
 }
 
 static void rx_refill(volatile struct lldesc *d) {
-    d->size = RX_BUF_SIZE;
-    d->length = 0;
+    d->length = d->size;
     d->offset = 0;
     d->sosf = 0;
     d->eof = 0;
     d->owner = 1;
-    WRITE_REG(MAC_DMA_RX_TAIL, (unsigned int) d);
 }
 
+/* This DMA signals a completed frame with the descriptor's EOF bit (and length),
+ * leaving owner=1 — not by clearing owner as a classic lldesc ring would. Drain on
+ * EOF, refilling each consumed descriptor and republishing the head. */
 static int rx_drain(void) {
     int n = 0;
-    while (rx_cursor->owner == 0) {
+    while (rx_cursor->eof) {
         rx_dump(rx_cursor);
         rx_refill(rx_cursor);
         rx_cursor = rx_cursor->next;
         n++;
     }
+    if (n && READ_REG(MAC_DMA_RX_CURRENT) != (unsigned int) rx_cursor)
+        WRITE_REG(MAC_DMA_RX_HEAD, (unsigned int) rx_cursor);
     return n;
 }
 
-static void rx_block(void) {
-    int mask = disable();
-    proc_remove(wifi_rx_servicer_pid);
-    proctab[wifi_rx_servicer_pid].status = PROC_IO_WAIT;
-    sched();
-    enable(mask);
-}
-
+/* Poll the RX ring and hop channels 1..13. The interrupt-driven wake path does
+ * not work yet (the NMI frame handler faults on entry), so this busy-polls; the
+ * DMA fills the ring continuously, so polling loses no frames. */
 void wifi_rx_servicer(void) {
     rx_cursor = rx_ring;
+    unsigned int ch = 1;
+    unsigned int last = ccount();
     while (1) {
-        wifi_rx_pending = 0;
-        if (rx_drain() == 0)
-            rx_block();
+        rx_drain();
+        if (ccount() - last >= CHAN_DWELL_CYCLES) {
+            ch = (ch >= 13) ? 1 : ch + 1;
+            wifi_set_channel(ch);
+            last = ccount();
+        }
     }
 }

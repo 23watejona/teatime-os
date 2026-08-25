@@ -21,7 +21,8 @@ OBJ=$(SRC_C:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o) \
     $(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
 DEPENDS=$(OBJ:%.o=%.d)
 
-USB?=/dev/ttyUSB0
+# Auto-discover the board's serial port (macOS CP210x / SiLabs, then Linux). Override with USB=...
+USB?=$(shell ls /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART* /dev/tty.usbserial-* /dev/ttyUSB* 2>/dev/null | head -n1)
 ESPTOOL=esptool
 
 .PHONY: default all flash monitor clean

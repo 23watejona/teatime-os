@@ -5,3 +5,6 @@
 **/*.elf
 **/*.map
 compile/build/
+
+# Private per-checkout instructions
+CLAUDE.local.md
