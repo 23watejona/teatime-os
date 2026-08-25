@@ -2,6 +2,8 @@
 
 extern void kprintf_uart(const char *, ...);
 
+unsigned char wifi_mac_addr[6];
+
 static unsigned char crc8(const unsigned char *p, unsigned int len) {
     unsigned char c = 0;
     while (len--) {
@@ -40,6 +42,9 @@ void init_wifi_mac_addr(void) {
         mac[4] = 0;
         mac[5] = 0;
     }
+
+    for (int i = 0; i < 6; i++)
+        wifi_mac_addr[i] = mac[i];
 
     kprintf_uart("MAC: %x:%x:%x:%x:%x:%x\n",
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);

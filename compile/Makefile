@@ -29,6 +29,25 @@ ESPTOOL=esptool
 
 default: prog.bin
 
+AP_SECRETS=$(INCLUDE_DIR)/ap_secrets.h
+
+# Untracked, per-checkout AP credentials. Generated from the environment when
+# absent; the build refuses to proceed rather than bake in a default network.
+$(AP_SECRETS):
+	@if [ -n "$$WIFI_SSID" ] && [ -n "$$WIFI_PASS" ] && [ -n "$$WIFI_BSSID" ]; then \
+	  { echo '#ifndef AP_SECRETS_H'; echo '#define AP_SECRETS_H'; \
+	    printf '#define AP_SSID  "%s"\n' "$$WIFI_SSID"; \
+	    printf '#define AP_PASS  "%s"\n' "$$WIFI_PASS"; \
+	    printf '#define AP_BSSID_BYTES  %s\n' "$$WIFI_BSSID"; \
+	    echo '#endif'; } > $@; \
+	  echo "generated $@ from environment"; \
+	else \
+	  echo "ERROR: $@ is missing."; \
+	  echo "  Set WIFI_SSID, WIFI_PASS and WIFI_BSSID (e.g. WIFI_BSSID='0x00, 0x00, 0x00, 0x00, 0x00, 0x00'),"; \
+	  echo "  or copy $(AP_SECRETS).example to $@ and fill it in."; \
+	  exit 1; \
+	fi
+
 # Host-compiled crypto self-test (RFC/FIPS vectors); needs no hardware.
 test:
 	cc -std=c99 -Wall -I $(INCLUDE_DIR) ../tests/crypto_test.c $(SRC_DIR)/device/wifi/wifi_crypto.c -o build/crypto_test
@@ -50,6 +69,8 @@ prog.bin: prog.elf
 prog.elf: $(OBJ) prog.ld peri.ld
 	@echo "Linking $@"
 	@$(LD) $(LDFLAGS) -T prog.ld peri.ld $(OBJ) -o $@
+
+$(OBJ): | $(AP_SECRETS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"

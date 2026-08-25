@@ -217,7 +217,8 @@ static void rx_gain_table_load(unsigned int do_iq, unsigned int *dc_table,
 
     WRITE_REG_UNMASK(0x600005c8, 0x00030000);
     pbus_tx_power_off();
-    pbus_force(2, 1, 0x184);
+    // bit0 brings the tx path up alongside rx but leaves the pa gain off, so the mac keys the pa per burst; continuous drive saturates rx
+    pbus_force(2, 1, 0x185);
     pbus_force(3, 2, 6);
     pbus_work_mode();
 

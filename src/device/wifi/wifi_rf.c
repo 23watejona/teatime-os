@@ -9,6 +9,9 @@ static void rx_analog_init(void);
 void rx_gain_init(unsigned int rxmax);
 void init_wifi_pbus(void);
 void init_wifi_bb(void);
+void tx_rf_enable(void);
+unsigned int rx_digital_stop(void);
+void rx_digital_start(unsigned int a2c_saved);
 
 void rx_path_enable(void) {
     WRITE_REG_RMW(0x600005e8, 0xfe7fffff, 0);
@@ -82,6 +85,11 @@ void wifi_rf_on(void) {
 
     if (READ_REG(0x3ff20c70) & 2)
         rx_path_enable();
+
+    // the rf off/on cycle above resets the tx enable, so it is redone here with the rx datapath stopped, since poking the shared tx analog with rx up wedges both
+    unsigned int dig = rx_digital_stop();
+    tx_rf_enable();
+    rx_digital_start(dig);
 }
 
 void rc_calibrate(void) {
@@ -160,6 +168,21 @@ void pbus_tx_power_off(void) {
     pbus_force(6, 1, 0);
     pbus_force(1, 1, 12);
     pbus_force(2, 1, 128);
+}
+
+#define TX_BB_ATTEN 0x00u
+static void tx_bb_atten_max(void) {
+    for (unsigned int i = 0; i < 0x18u; i++) {
+        unsigned int a = 0x60000504u + 4u * i;
+        WRITE_REG(a, (READ_REG(a) & 0xffffff00u) | TX_BB_ATTEN);
+    }
+}
+
+void tx_rf_enable(void) {
+    rf_i2c_write_mask(119, 0, 28, 6, 6, 1); // tx bb clock
+    rf_i2c_write_mask(124, 1, 21, 0, 0, 1);
+    rf_i2c_write_mask(119, 0, 9, 7, 0, 0); // overflow trim, not the drive level
+    tx_bb_atten_max();
 }
 
 void pbus_work_mode(void) {
@@ -499,6 +522,9 @@ void bb_bringup(void) {
 }
 
 void antenna_switch_init(void) {
+    // left at reset the antenna switch never keys to tx, so the patterns are set here
+    WRITE_REG(0x60009d60, 0x01010101);
+    WRITE_REG(0x60009d64, 0x04010101);
     WRITE_REG_MASK(0x60009b00, 0x00800000);
     WRITE_REG_RMW(0x60009b08, 0xffffc3ff, 0x00000800);
     WRITE_REG(0x60009a28, 2);
