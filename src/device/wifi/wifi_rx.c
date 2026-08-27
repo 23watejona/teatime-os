@@ -14,6 +14,10 @@
 extern void wifi_set_channel(unsigned int ch);
 extern void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen);
 extern void wifi_wpa_input(volatile unsigned char *buf, unsigned int len);
+extern int wifi_ccmp_rx(volatile unsigned char *buf, unsigned int len, unsigned char *out);
+extern void net_input(const unsigned char *llc, unsigned int len);
+extern void net_tick(void);
+extern void wifi_rx_poll_done(void);
 
 int wifi_rx_servicer_pid = -1;
 
@@ -27,6 +31,11 @@ static void rx_dump(volatile struct lldesc *d) {
     wifi_ap_observe(p, d->length);
     wifi_sta_input(p, d->length);
     wifi_wpa_input(p, d->length);
+
+    static unsigned char llc[2048];
+    int nl = wifi_ccmp_rx(p, d->length, llc);
+    if (nl > 0)
+        net_input(llc, (unsigned int) nl);
 }
 
 static void rx_refill(volatile struct lldesc *d) {
@@ -63,7 +72,9 @@ void wifi_rx_servicer(void) {
     unsigned int last = ccount();
     while (1) {
         rx_drain();
+        wifi_rx_poll_done();
         wifi_station_tick();
+        net_tick();
         if (wifi_locked_channel) {
             if (locked_now != wifi_locked_channel) {
                 wifi_set_channel(wifi_locked_channel);

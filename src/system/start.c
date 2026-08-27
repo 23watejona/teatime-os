@@ -27,6 +27,7 @@ void init_wifi_mac(void);
 void wifi_mac_rx_enable(void);
 void init_wifi_mac_addr(void);
 void init_wifi_rf(void);
+void wifi_secrets_init(void);
 void wifi_set_channel(int);
 void startup_proc(void);
 void wifi_rx_servicer(void);
@@ -78,6 +79,7 @@ void start ( void )
     kprintf_uart("\nproceeding\n");
 
     wdt_feed();
+    wifi_secrets_init();
     kprintf_uart("wifi: clk\n");
     init_wifi_clk();
     kprintf_uart("wifi: pbus\n");
@@ -91,9 +93,9 @@ void start ( void )
     init_wifi_mac();
     kprintf_uart("wifi: mac_addr\n");
     init_wifi_mac_addr();
-    // WiFi NMI source left disarmed: it fires correctly on RX events, but the NMI
-    // frame handler (ctxsw.s) faults on entry, so the RX servicer polls instead.
-    WRITE_REG(0x3ff00000, READ_REG(0x3ff00000) & 0xffffffe0);
+    // Arm the WiFi NMI source (bit0). Its level-3 handler (drive_nmi, intr.s)
+    // services the MAC RX/TX-done events; the RX servicer still drains the ring.
+    WRITE_REG(0x3ff00000, (READ_REG(0x3ff00000) & 0xffffffe0) | 1);
     kprintf_uart("wifi: rx_enable\n");
     wifi_mac_rx_enable();
     kprintf_uart("wifi: done\n");

@@ -7,7 +7,10 @@
 
 #define MAX_APS 256
 
-static unsigned char ap_bssid[MAX_APS][6];
+extern unsigned char ap_bssid[6];
+volatile int wifi_target_channel;
+
+static unsigned char seen_bssid[MAX_APS][6];
 static int ap_count;
 static int ap_table_full;
 
@@ -15,7 +18,7 @@ static int bssid_known(const volatile unsigned char *b) {
     for (int i = 0; i < ap_count; i++) {
         int same = 1;
         for (int j = 0; j < 6; j++)
-            if (ap_bssid[i][j] != b[j]) { same = 0; break; }
+            if (seen_bssid[i][j] != b[j]) { same = 0; break; }
         if (same)
             return 1;
     }
@@ -28,8 +31,15 @@ static void bssid_remember(const volatile unsigned char *b) {
         return;
     }
     for (int j = 0; j < 6; j++)
-        ap_bssid[ap_count][j] = b[j];
+        seen_bssid[ap_count][j] = b[j];
     ap_count++;
+}
+
+static int is_target_bssid(const volatile unsigned char *b) {
+    for (int i = 0; i < 6; i++)
+        if (b[i] != ap_bssid[i])
+            return 0;
+    return 1;
 }
 
 void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
@@ -83,6 +93,9 @@ void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
         }
         off += 2 + len;
     }
+
+    if (is_target_bssid(bssid) && channel > 0)
+        wifi_target_channel = channel;
 
     bssid_remember(bssid);
 

@@ -4,11 +4,10 @@
 #include "wifi_crypto.h"
 #include "wifi_tx.h"
 #include "wifi_wpa.h"
+#include "wifi_ccmp.h"
 #include "ap_secrets.h"
 
-typedef unsigned char u8;
-
-extern const unsigned char ap_bssid[6];
+extern unsigned char ap_bssid[6];
 extern const char ap_ssid[];
 extern unsigned char wifi_mac_addr[6];
 
@@ -24,7 +23,7 @@ unsigned int  wpa_gtk_len;
 unsigned int  wpa_gtk_id;
 
 static u8 pmk[32];
-static u8 ptk[48];               /* KCK[0:16] | KEK[16:32] | TK[32:48] */
+static u8 ptk[48];
 static u8 anonce[32], snonce[32];
 static u8 replay[8];
 
@@ -103,16 +102,16 @@ static void send_eapol(unsigned int keyinfo, const u8 *nonce,
     u8 f[256];
     unsigned int n = 0;
 
-    f[n++] = 0x08; f[n++] = 0x01;                          /* data, ToDS */
+    f[n++] = 0x08; f[n++] = 0x01;
     f[n++] = 0x00; f[n++] = 0x00;
-    for (int i = 0; i < 6; i++) f[n++] = ap_bssid[i];      /* addr1 RA/BSSID */
-    for (int i = 0; i < 6; i++) f[n++] = wifi_mac_addr[i]; /* addr2 TA */
-    for (int i = 0; i < 6; i++) f[n++] = ap_bssid[i];      /* addr3 DA */
+    for (int i = 0; i < 6; i++) f[n++] = ap_bssid[i];
+    for (int i = 0; i < 6; i++) f[n++] = wifi_mac_addr[i];
+    for (int i = 0; i < 6; i++) f[n++] = ap_bssid[i];
     f[n++] = 0x00; f[n++] = 0x00;
 
     f[n++] = 0xaa; f[n++] = 0xaa; f[n++] = 0x03;
     f[n++] = 0x00; f[n++] = 0x00; f[n++] = 0x00;
-    f[n++] = 0x88; f[n++] = 0x8e;                          /* EAPOL ethertype */
+    f[n++] = 0x88; f[n++] = 0x8e;
 
     u8 *e = f + n;
     unsigned int blen = 95 + kdlen;
@@ -122,7 +121,7 @@ static void send_eapol(unsigned int keyinfo, const u8 *nonce,
     e[E_BODYLEN] = blen >> 8; e[E_BODYLEN + 1] = blen;
     e[E_DESC] = 0x02;
     e[E_KEYINFO] = keyinfo >> 8; e[E_KEYINFO + 1] = keyinfo;
-    e[E_KEYLEN] = 0x00; e[E_KEYLEN + 1] = 16;
+    e[E_KEYLEN] = 0x00; e[E_KEYLEN + 1] = kdlen ? 16 : 0;
     memcpy(e + E_REPLAY, replay, 8);
     if (nonce)
         memcpy(e + E_NONCE, nonce, 32);
@@ -143,7 +142,7 @@ static volatile u8 *find_eapol(volatile u8 *f, unsigned int flen) {
     if (((fc0 >> 2) & 3) != 2)
         return 0;
     unsigned int hdr = 24;
-    if ((fc0 >> 4) & 8)          /* QoS data carries a 2-byte QoS control */
+    if ((fc0 >> 4) & 8)
         hdr += 2;
     if (flen < hdr + 8 + 4)
         return 0;
@@ -222,8 +221,12 @@ static void handle_m3(volatile u8 *e, unsigned int elen) {
     }
 
     memcpy(wpa_tk, TK, 16);
-    send_eapol(2 | KI_PAIRWISE | KI_MIC | KI_SECURE, 0, 0, 0);
+
+    // once the pairwise key is installed the hardware encrypts every frame to the ap, so a lost msg4 could never be resent readably; burst it before installing so one lands in the clear
     if (wpa_state != WPA_DONE) {
+        for (int i = 0; i < 4; i++)
+            send_eapol(2 | KI_PAIRWISE | KI_MIC | KI_SECURE, 0, 0, 0);
+        wifi_ccmp_install_keys();
         wpa_state = WPA_DONE;
         kprintf_uart("wpa: msg3 MIC ok, msg4 sent — 4-way COMPLETE (gtk_len=%u id=%u)\n",
                      wpa_gtk_len, wpa_gtk_id);

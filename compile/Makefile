@@ -39,12 +39,14 @@ $(AP_SECRETS):
 	  { echo '#ifndef AP_SECRETS_H'; echo '#define AP_SECRETS_H'; \
 	    printf '#define AP_SSID  "%s"\n' "$$WIFI_SSID"; \
 	    printf '#define AP_PASS  "%s"\n' "$$WIFI_PASS"; \
-	    printf '#define AP_BSSID_BYTES  %s\n' "$$WIFI_BSSID"; \
+	    printf '#define AP_BSSID "%s"\n' "$$WIFI_BSSID"; \
+	    printf '#define NET_IP   "%s"\n' "$${WIFI_NET_IP:-0.0.0.0}"; \
+	    printf '#define NET_GW   "%s"\n' "$${WIFI_NET_GW:-0.0.0.0}"; \
 	    echo '#endif'; } > $@; \
 	  echo "generated $@ from environment"; \
 	else \
 	  echo "ERROR: $@ is missing."; \
-	  echo "  Set WIFI_SSID, WIFI_PASS and WIFI_BSSID (e.g. WIFI_BSSID='0x00, 0x00, 0x00, 0x00, 0x00, 0x00'),"; \
+	  echo "  Set WIFI_SSID, WIFI_PASS and WIFI_BSSID (e.g. WIFI_BSSID='02:00:00:00:00:01'),"; \
 	  echo "  or copy $(AP_SECRETS).example to $@ and fill it in."; \
 	  exit 1; \
 	fi
@@ -72,6 +74,10 @@ prog.elf: $(OBJ) prog.ld peri.ld
 	@$(LD) $(LDFLAGS) -T prog.ld peri.ld $(OBJ) -o $@
 
 $(OBJ): | $(AP_SECRETS)
+
+$(BUILD_DIR)/device/wifi/wifi_crypto.o $(BUILD_DIR)/device/wifi/wifi_ccmp.o \
+$(BUILD_DIR)/device/net/net.o $(BUILD_DIR)/device/wifi/wifi_wpa.o \
+$(BUILD_DIR)/device/wifi/wifi_ap_scan.o: CFLAGS += -Os
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"

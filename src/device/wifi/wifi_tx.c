@@ -3,7 +3,6 @@
 #include "uart.h"
 #include "wifi_dma.h"
 #include "wifi_tx.h"
-#include "ap_secrets.h"
 
 // tx is a per-queue mmio block rather than a descriptor ring: the length, plcp and descriptor words are armed first and the go bits set last, so the queue never launches a half-written frame; completion is TX_DONE_BIT in MAC_INT_EVENT
 
@@ -14,9 +13,15 @@
 #define TX_GO_BITS     0xc0000000u
 
 #define TX_QUEUE       0u
-#define TX_RATE        0u            /* 1 Mbps CCK; no OFDM PLCP word */
-/* bit24 = PLCP format, bit22 = 11b/CCK */
-#define TX_FMT_BITS    0x01400000u
+#define TX_RATE        0u /* 1 Mbps CCK; no OFDM PLCP word */
+/* Descriptor words for a protected (CCMP) data frame. The engine picks the TX key
+   by the slot index carried in DC8 bits 16-23 — unlike RX, which address-matches
+   A2 — so the pairwise slot must be named here, or the frame encrypts against an
+   empty slot and the TX pipeline stalls with no completion. */
+#define TX_FMT_BITS    0x01600000u /* format: crypto-route + non-aggregated data class */
+#define TX_KEYSLOT     6u /* pairwise (PTK) key-table slot */
+#define TX_DD0         0x002c0000u /* duration */
+#define TX_DD4         0x003ff000u /* frame lifetime; zero can age the frame out before TX */
 
 extern unsigned char wifi_mac_addr[6];
 
@@ -24,7 +29,6 @@ static struct lldesc tx_desc __attribute__((aligned(4)));
 static unsigned char tx_buf[1600] __attribute__((aligned(4)));
 
 volatile unsigned int wifi_tx_done_count;
-volatile unsigned int wifi_tx_last_ctrl;
 
 int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
     if (len > sizeof(tx_buf))
@@ -32,10 +36,26 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
     for (unsigned int i = 0; i < len; i++)
         tx_buf[i] = frame[i];
 
-    unsigned int air = len + 4;             /* + FCS */
+    unsigned int air = len + 4;
     unsigned int B = TXQ(TX_QUEUE);
 
-    /* owner=1 or the engine raises TX_DONE_BIT without ever DMAing the frame */
+    /* Protected frames carry the Protected bit + CCMP header + plaintext; the engine
+       encrypts and appends the MIC, and needs the pairwise key slot in the descriptor
+       (see TX_KEYSLOT). Plaintext frames (EAPOL/probe) use the plain descriptor. */
+    unsigned int protectd = (len >= 2 && (tx_buf[1] & 0x40));
+    unsigned int dc4, dc8, dd0, dd4;
+    if (protectd) {
+        dc4 = TX_FMT_BITS;
+        dc8 = (air & 0xfffu) | (TX_RATE << 12) | (TX_KEYSLOT << 16);
+        dd0 = TX_DD0;
+        dd4 = TX_DD4;
+    } else {
+        dc4 = 0x00400000u;
+        dc8 = air | (TX_RATE << 12);
+        dd0 = 0;
+        dd4 = 0;
+    }
+
     tx_desc.size = air;
     tx_desc.length = air;
     tx_desc.offset = 0;
@@ -50,14 +70,16 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
     WRITE_REG(MAC_INT_CLEAR, TX_DONE_BIT);
 
     __asm__ volatile("memw");
-    WRITE_REG(B + 0x08, air | (TX_RATE << 12));
-    WRITE_REG(B + 0x10, 0);
-    WRITE_REG(B + 0x14, 0);
+    WRITE_REG(B + 0x08, dc8);
+    WRITE_REG(B + 0x10, dd0);
+    WRITE_REG(B + 0x14, dd4);
     WRITE_REG(B + 0x00, (air << 12) & 0x3ff000u);
-    WRITE_REG(B + 0x04, daddr | TX_FMT_BITS);
+    WRITE_REG(B + 0x04, daddr | dc4);
     __asm__ volatile("memw");
     WRITE_REG(B + 0x04, READ_REG(B + 0x04) | TX_GO_BITS);
 
+    /* Bounded spin: also the settle that keeps the next frame from reusing the
+       descriptor before the DMA has read it. */
     int rc = 0;
     for (int t = 0; t < 200000; t++) {
         if (READ_REG(MAC_INT_EVENT) & TX_DONE_BIT) {
@@ -67,22 +89,20 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
             break;
         }
     }
-    wifi_tx_last_ctrl = READ_REG(B + 0x04);
     return rc;
 }
 
-/* strong ch6 AP, used only to elicit a probe response and confirm we radiate */
-static const unsigned char probe_target[6] = { AP_BSSID_BYTES };
+extern unsigned char ap_bssid[6];
 
 static unsigned int build_probe_req(unsigned char *b) {
     unsigned int n = 0;
     b[n++] = 0x40; b[n++] = 0x00;
     b[n++] = 0x00; b[n++] = 0x00;
-    for (int i = 0; i < 6; i++) b[n++] = probe_target[i];   /* addr1 DA */
-    for (int i = 0; i < 6; i++) b[n++] = wifi_mac_addr[i];  /* addr2 SA */
-    for (int i = 0; i < 6; i++) b[n++] = probe_target[i];   /* addr3 BSSID */
+    for (int i = 0; i < 6; i++) b[n++] = ap_bssid[i];
+    for (int i = 0; i < 6; i++) b[n++] = wifi_mac_addr[i];
+    for (int i = 0; i < 6; i++) b[n++] = ap_bssid[i];
     b[n++] = 0x00; b[n++] = 0x00;
-    b[n++] = 0x00; b[n++] = 0x00;                            /* SSID IE, wildcard */
+    b[n++] = 0x00; b[n++] = 0x00;
     b[n++] = 0x01; b[n++] = 0x04;
     b[n++] = 0x82; b[n++] = 0x84; b[n++] = 0x8b; b[n++] = 0x96;
     return n;

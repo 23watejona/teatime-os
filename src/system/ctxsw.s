@@ -125,22 +125,13 @@ _restore_intr_frame:
     ret
 
 
-    .align 4
-    .global _create_nmi_frame
-_create_nmi_frame:
-    addi sp, sp, -96
-    s32i a0, sp, 0x10
-    SAVE_SREGS_NMI
-    SAVE_AREGS
-    l32i a0, sp, 0x10
-    ret
-
-    .align 4
-    .global _restore_nmi_frame
-_restore_nmi_frame:
-    s32i a0, sp, 0x10
-    REST_AREGS
-    REST_SREGS_NMI
-    l32i a0, sp, 0x10
-    addi sp, sp, 96
-    ret
+    # Dedicated level-3 NMI stack. drive_nmi (intr.s) uses _nmi_frame as both the
+    # HESF save area (offsets 0x00..0x5c) and the C handler's stack pointer, which
+    # grows DOWN into the reserved space below it. Never the interrupted task's sp.
+    .section .bss
+    .align 16
+_nmi_stack_bottom:
+    .space 1024
+    .global _nmi_frame
+_nmi_frame:
+    .space 0x60
