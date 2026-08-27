@@ -19,6 +19,9 @@ MEMORY
 
   /* Functions which are critical should be put in this segment. */
   iram_seg  :    org = 0x40100000, len = 0x8000
+
+  /* cache window base plus the irom image's flash offset from the esptool write */
+  irom_seg  :    org = 0x40210000, len = 0x80000
 }
 
 /*  Default entry point:  */
@@ -48,6 +51,9 @@ SECTIONS
     _init_end = ABSOLUTE(.);
   } > iram_seg
 
+  /* IRAM: only what must not run from flash. C code opts in with IRAM_ATTR,
+     the asm glue with .section .iram1. Everything else falls through to
+     .irom0.text. */
   .text :
   {
     _stext = .;
@@ -56,13 +62,28 @@ SECTIONS
     *(.entry.text)
     *(.init.literal)
     *(.init)
-    *(.literal .text .literal.* .text.* .stub .gnu.warning .gnu.linkonce.literal.* .gnu.linkonce.t.*.literal .gnu.linkonce.t.*)
+    *start.o(.literal .text .literal.* .text.*)
+    *intr.o(.literal .text .literal.* .text.*)
+    *intr_util.o(.literal .text .literal.* .text.*)
+    *ctxsw.o(.literal .text .literal.* .text.*)
+    *_set_vec_base.o(.literal .text .literal.* .text.*)
+    *disable.o(.literal .text .literal.* .text.*)
+    *enable.o(.literal .text .literal.* .text.*)
+    *wifi_fiq.o(.literal .text .literal.* .text.*)
+    *handle_cputimer_intr.o(.literal .text .literal.* .text.*)
     *(.iram1 .iram1.*) /* catch stray IRAM_ATTR */
     *(.fini.literal)
     *(.fini)
     _text_end = ABSOLUTE(.);
     _etext = .;
   } > iram_seg
+
+  .irom0.text :
+  {
+    _irom_start = ABSOLUTE(.);
+    *(.literal .text .literal.* .text.* .stub .gnu.warning .gnu.linkonce.literal.* .gnu.linkonce.t.*.literal .gnu.linkonce.t.*)
+    _irom_end = ABSOLUTE(.);
+  } > irom_seg
 
   /* Shared RAM */
   .bss (NOLOAD) :

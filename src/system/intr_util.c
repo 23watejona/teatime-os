@@ -10,7 +10,7 @@ unsigned int intr_enable(unsigned int mask);
 
 void (*l1_interrupt_handlers[NUM_L1_INTR])(void);
 
-void debug_handler() {
+IRAM_ATTR void debug_handler() {
   unsigned int debug_cause = 0;
 
   asm("rsr.debugcause %0": "=a" (debug_cause): : "memory");
@@ -69,7 +69,7 @@ void syscall_handler (unsigned int exccause, unsigned int int_cause) {
     }
 }
 
-void double_exc_handler() {
+IRAM_ATTR void double_exc_handler() {
   kprintf_uart("\nagggg what am i doing here\n");
 }
 

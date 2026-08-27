@@ -1,4 +1,4 @@
-    .text
+    .section .iram1,"ax",@progbits
     .align 4
 
     .macro SAVE_AREGS

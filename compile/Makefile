@@ -9,7 +9,7 @@ AS=$(CROSS)as
 
 CFLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-missing-braces -O0 \
        -ffreestanding -fzero-initialized-in-bss -I $(INCLUDE_DIR) \
-       -ffunction-sections -fdata-sections
+       -ffunction-sections -fdata-sections -mlongcalls
 LDFLAGS=-nostdlib -nostartfiles --gc-sections
 ASFLAGS=--warn --fatal-warnings -I $(INCLUDE_DIR)
 
@@ -59,7 +59,8 @@ test:
 all: flash monitor
 
 flash: prog.bin
-	$(ESPTOOL) --port $(USB) write_flash -fm qio 0x00000 $<
+	@test -n "$(USB)" || { echo "ERROR: no serial port found — plug the board in or set USB=/dev/..."; exit 1; }
+	$(ESPTOOL) --port $(USB) write_flash -fm qio 0x00000 prog.bin 0x10000 prog.irom.bin
 
 monitor:
 	picocom $(USB) -b 76800
@@ -68,6 +69,7 @@ prog.bin: prog.elf
 	@echo "Generating $@ from $<"
 	@$(ESPTOOL) --chip esp8266 elf2image $< -o $@
 	@mv $@0x00000.bin $@
+	@mv $@0x10000.bin prog.irom.bin
 
 prog.elf: $(OBJ) prog.ld peri.ld
 	@echo "Linking $@"

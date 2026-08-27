@@ -1,5 +1,5 @@
 #define VEC_BASE (0x40100000)
-    .text
+    .section .iram1,"ax",@progbits
     .global _set_vec_base
     .align 4
 _set_vec_base:

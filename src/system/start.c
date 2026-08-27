@@ -1,3 +1,4 @@
+#include "def.h"
 #include "uart.h"
 #include "reg_util.h"
 #include "proc.h"
@@ -44,10 +45,49 @@ extern unsigned int _bss_start, _bss_end;
 proctab_entry proctab[NUM_PROC] = {0};
 int curr_pid = 0;
 
-void start ( void )
+#define CACHE_CTRL  0x3ff0000c
+#define CACHE_CTRL2 0x3ff00024
+#define SPI0_CTRL   0x60000208
+
+/* Map the first MB of flash at 0x40200000. Runs with the cache off, so it and
+   everything it touches must live in IRAM. */
+IRAM_ATTR static void flash_cache_enable(void)
+{
+    while (READ_REG(CACHE_CTRL) & 0x100)
+        WRITE_REG_UNMASK(CACHE_CTRL, 0x100); // must be off before the flush below
+    asm volatile("memw");
+
+    WRITE_REG_UNMASK(SPI0_CTRL, 0x20000); // spi0 cache arbitration, held off across the flush
+    asm volatile("memw");
+
+    WRITE_REG_UNMASK(CACHE_CTRL, 1);
+    WRITE_REG_MASK(CACHE_CTRL, 1);
+    while (!(READ_REG(CACHE_CTRL) & 2))
+        ;
+    WRITE_REG_UNMASK(CACHE_CTRL, 1);
+    asm volatile("memw");
+
+    WRITE_REG_MASK(SPI0_CTRL, 0x20000);
+    asm volatile("memw");
+
+    // block select and count cleared, single-mb mode: maps the first mb of flash
+    WRITE_REG_UNMASK(CACHE_CTRL, 0x03000000);
+    WRITE_REG_RMW(CACHE_CTRL, 0xfbf8ffff, 1u << 26);
+    WRITE_REG_MASK(CACHE_CTRL2, 0x18);
+    asm volatile("memw");
+
+    WRITE_REG_MASK(CACHE_CTRL, 0x100);
+    while (!(READ_REG(CACHE_CTRL) & 0x100))
+        ;
+}
+
+IRAM_ATTR void start ( void )
 {
     for (unsigned int *p = &_bss_start; p < &_bss_end; ++p)
         *p = 0;
+
+    // everything but start.o and the interrupt path runs from flash, so this must be the first call
+    flash_cache_enable();
 
     _set_vec_base();
     BUSY_WAIT();
