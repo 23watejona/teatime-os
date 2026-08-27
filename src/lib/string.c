@@ -7,6 +7,16 @@ void *memcpy(void *dst, const void *src, unsigned long n) {
     return dst;
 }
 
+void *memmove(void *dst, const void *src, unsigned long n) {
+    unsigned char *d = dst;
+    const unsigned char *s = src;
+    if (d < s)
+        for (unsigned long i = 0; i < n; i++) d[i] = s[i];
+    else
+        for (unsigned long i = n; i > 0; i--) d[i - 1] = s[i - 1];
+    return dst;
+}
+
 void *memset(void *dst, int c, unsigned long n) {
     unsigned char *d = dst;
     for (unsigned long i = 0; i < n; i++) d[i] = (unsigned char)c;

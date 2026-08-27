@@ -4,19 +4,49 @@
 #include "wifi_ccmp.h"
 #include "wifi_wpa.h"
 #include "net.h"
+#include "ipv4.h"
+#include "udp.h"
 
-/* Minimal IPv4 over the WPA2 link: static address, ARP the gateway for its MAC,
-   then ICMP echo it. Everything rides in an LLC/SNAP-framed CCMP data frame to
-   the AP. Not a general stack — just enough to prove the link end to end. */
+#define MTU (1518)
+
+#define ETHERTYPE_ARP  0x0806
+#define ETHERTYPE_IPV4 0x0800
+
+#define LLC_SNAP_LEN 8
+
+#define ARP_HTYPE_ETHERNET 1
+#define ARP_OPER_REQUEST 1
+#define ARP_OPER_REPLY   2
 
 extern unsigned char wifi_mac_addr[6];
 extern volatile int wpa_state;
-extern unsigned char our_ip[4], gw_ip[4];
+extern struct ipv4_addr local_ip;
+extern struct ipv4_addr gw_ip;
 
 static const u8 bcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 static u8 gw_mac[6];
 static int have_gw;
+
+struct arp_pkt {
+    unsigned short htype;
+    unsigned short ptype;
+    u8 hlen;
+    u8 plen;
+    unsigned short oper;
+    u8 sender_mac[6];
+    struct ipv4_addr sender_ip;
+    u8 target_mac[6];
+    struct ipv4_addr target_ip;
+} __attribute__((packed));
+
+struct icmp_echo {
+    u8 type;
+    u8 code;
+    unsigned short checksum;
+    unsigned short ident;
+    unsigned short seq;
+} __attribute__((packed));
 
 volatile unsigned int net_ping_replies;
 static unsigned int icmp_seq;
@@ -24,6 +54,9 @@ static unsigned int icmp_seq;
 enum { NET_IDLE, NET_ARP, NET_PING };
 static int state;
 static unsigned int last;
+static int dns_sent;
+
+void dns_test_send(void);
 
 static unsigned int ccount(void) {
     unsigned int c;
@@ -34,111 +67,128 @@ static unsigned int ccount(void) {
 #define PERIOD_ARP   40000000u /* ~500 ms at 80 MHz */
 #define PERIOD_PING  80000000u /* ~1 s */
 
-static unsigned short cksum(const u8 *p, unsigned int n) {
-    unsigned int s = 0;
-    for (unsigned int i = 0; i + 1 < n; i += 2)
-        s += (p[i] << 8) | p[i + 1];
-    if (n & 1)
-        s += p[n - 1] << 8;
-    while (s >> 16)
-        s = (s & 0xffff) + (s >> 16);
-    return (unsigned short) ~s;
-}
-
-/* Prepend the LLC/SNAP header for an ethertype; returns bytes written (8). */
-static unsigned int put_snap(u8 *b, unsigned int ethertype) {
+static void put_snap(u8 *b, unsigned int ethertype) {
     b[0] = 0xaa; b[1] = 0xaa; b[2] = 0x03;
     b[3] = 0x00; b[4] = 0x00; b[5] = 0x00;
     b[6] = ethertype >> 8; b[7] = ethertype & 0xff;
-    return 8;
 }
 
 static void send_arp_request(void) {
-    u8 p[8 + 28];
-    unsigned int n = put_snap(p, 0x0806);
-    u8 *a = p + n;
-    a[0] = 0x00; a[1] = 0x01;
-    a[2] = 0x08; a[3] = 0x00;
-    a[4] = 6; a[5] = 4;
-    a[6] = 0x00; a[7] = 0x01;
-    memcpy(a + 8, wifi_mac_addr, 6);
-    memcpy(a + 14, our_ip, 4);
-    memset(a + 18, 0, 6);
-    memcpy(a + 24, gw_ip, 4);
-    wifi_ccmp_tx(bcast, p, n + 28);
+    u8 p[LLC_SNAP_LEN + sizeof(struct arp_pkt)];
+    put_snap(p, ETHERTYPE_ARP);
+    struct arp_pkt *a = (struct arp_pkt *) (p + LLC_SNAP_LEN);
+    a->htype = htons(ARP_HTYPE_ETHERNET);
+    a->ptype = htons(ETHERTYPE_IPV4);
+    a->hlen = sizeof(a->sender_mac);
+    a->plen = sizeof(a->sender_ip);
+    a->oper = htons(ARP_OPER_REQUEST);
+    memcpy(a->sender_mac, wifi_mac_addr, 6);
+    a->sender_ip = local_ip;
+    memset(a->target_mac, 0, 6);
+    a->target_ip = gw_ip;
+    wifi_ccmp_tx(bcast, p, sizeof(p));
 }
 
 static void send_ping(void) {
-    u8 p[8 + 20 + 8];
-    unsigned int n = put_snap(p, 0x0800);
-    u8 *ip = p + n;
-    unsigned int iplen = 20 + 8;
-    memset(ip, 0, iplen);
-    ip[0] = 0x45; ip[1] = 0x00;
-    ip[2] = iplen >> 8; ip[3] = iplen & 0xff;
-    ip[4] = 0x00; ip[5] = 0x00;
-    ip[6] = 0x00; ip[7] = 0x00;
-    ip[8] = 64; ip[9] = 1;
-    memcpy(ip + 12, our_ip, 4);
-    memcpy(ip + 16, gw_ip, 4);
-    unsigned short ic = cksum(ip, 20);
-    ip[10] = ic >> 8; ip[11] = ic & 0xff;
+    u8 p[LLC_SNAP_LEN + sizeof(union ipv4_header) + sizeof(struct icmp_echo)];
+    put_snap(p, ETHERTYPE_IPV4);
+    union ipv4_header *h = (union ipv4_header *) (p + LLC_SNAP_LEN);
+    memset(h, 0, sizeof(*h));
+    h->fields.version_ihl = 0x45;
+    h->fields.total_len = htons(sizeof(union ipv4_header) + sizeof(struct icmp_echo));
+    h->fields.ttl = 64;
+    h->fields.protocol = IPPROTO_ICMP;
+    h->fields.src_addr = local_ip.word;
+    h->fields.dest_addr = gw_ip.word;
+    h->fields.checksum = checksum(h->raw, sizeof(*h), 0);
 
-    u8 *icmp = ip + 20;
-    icmp[0] = 0x08; icmp[1] = 0x00;
-    icmp[4] = 0x00; icmp[5] = 0x01;
-    icmp[6] = icmp_seq >> 8; icmp[7] = icmp_seq & 0xff;
+    struct icmp_echo *e = (struct icmp_echo *) (h->raw + sizeof(*h));
+    e->type = ICMP_ECHO_REQUEST;
+    e->code = 0;
+    e->checksum = 0;
+    e->ident = htons(1);
+    e->seq = htons(icmp_seq);
     icmp_seq++;
-    unsigned short cc = cksum(icmp, 8);
-    icmp[2] = cc >> 8; icmp[3] = cc & 0xff;
+    e->checksum = checksum(e, sizeof(*e), 0);
 
-    wifi_ccmp_tx(gw_mac, p, n + iplen);
+    wifi_ccmp_tx(gw_mac, p, sizeof(p));
 }
 
-static void send_arp_reply(const u8 *dst_mac, const u8 *dst_ip) {
-    u8 p[8 + 28];
-    unsigned int n = put_snap(p, 0x0806);
-    u8 *a = p + n;
-    a[0] = 0x00; a[1] = 0x01;
-    a[2] = 0x08; a[3] = 0x00;
-    a[4] = 6; a[5] = 4;
-    a[6] = 0x00; a[7] = 0x02;
-    memcpy(a + 8, wifi_mac_addr, 6);
-    memcpy(a + 14, our_ip, 4);
-    memcpy(a + 18, dst_mac, 6);
-    memcpy(a + 24, dst_ip, 4);
-    wifi_ccmp_tx(dst_mac, p, n + 28);
-}
-
-void net_input(const unsigned char *llc, unsigned int len) {
-    if (len < 8)
+static void arp_recv(u8 *payload, unsigned int len) {
+    if (len < sizeof(struct arp_pkt))
         return;
-    unsigned int et = (llc[6] << 8) | llc[7];
-    const u8 *l3 = llc + 8;
-    unsigned int l3len = len - 8;
-    kprintf_uart("net: rx et=%x len=%u\n", et, len);
+    struct arp_pkt *a = (struct arp_pkt *) payload;
+    /* Learn the gateway MAC from any ARP it sends — its request for us carries
+       the MAC in the sender field too, not only a reply to our request. */
+    if (a->sender_ip.word == gw_ip.word) {
+        memcpy(gw_mac, a->sender_mac, 6);
+        have_gw = 1;
+    }
+    if (ntohs(a->oper) == ARP_OPER_REQUEST && a->target_ip.word == local_ip.word) {
+        u8 req_mac[6];
+        memcpy(req_mac, a->sender_mac, 6);
+        struct ipv4_addr req_ip = a->sender_ip;
+        a->oper = htons(ARP_OPER_REPLY);
+        memcpy(a->target_mac, req_mac, 6);
+        a->target_ip = req_ip;
+        memcpy(a->sender_mac, wifi_mac_addr, 6);
+        a->sender_ip = local_ip;
+        put_snap(payload - LLC_SNAP_LEN, ETHERTYPE_ARP);
+        wifi_ccmp_tx(req_mac, payload - LLC_SNAP_LEN,
+                     LLC_SNAP_LEN + sizeof(struct arp_pkt));
+    }
+}
 
-    if (et == 0x0806 && l3len >= 28) {
-        unsigned int oper = (l3[6] << 8) | l3[7];
-        if (oper == 1 && memcmp(l3 + 24, our_ip, 4) == 0)
-            send_arp_reply(l3 + 8, l3 + 14);
-        /* Learn the gateway MAC from any ARP it sends — its request for us carries
-           the MAC in the sender field too, not only a reply to our request. */
-        if (memcmp(l3 + 14, gw_ip, 4) == 0) {
-            memcpy(gw_mac, l3 + 8, 6);
-            have_gw = 1;
-        }
-    } else if (et == 0x0800 && l3len >= 28) {
-        if (memcmp(l3 + 16, our_ip, 4) == 0)
-            kprintf_uart("net: IPv4 TO-US proto=%u src=%u.%u.%u.%u\n",
-                         l3[9], l3[12], l3[13], l3[14], l3[15]);
-        if (l3[9] == 1) {
-            const u8 *icmp = l3 + ((l3[0] & 0x0f) * 4);
-            if (icmp[0] == 0x00) {
-                net_ping_replies++;
-                kprintf_uart("net: PING reply #%u from gateway\n", net_ping_replies);
-            }
-        }
+static void ipv4_recv(u8 *buf, unsigned int len) {
+    union ipv4_header *h = (union ipv4_header *) buf;
+    unsigned int ihl = (h->fields.version_ihl & 0x0f) * 4;
+    if (ihl < sizeof(union ipv4_header) || len < ihl)
+        return;
+    unsigned int payload_len = len - ihl;
+    u8 *payload = buf + ihl;
+    struct ipv4_addr src;
+    struct ipv4_addr dst;
+    src.word = h->fields.src_addr;
+    dst.word = h->fields.dest_addr;
+    int to_us = dst.word == local_ip.word;
+    switch (h->fields.protocol) {
+    case IPPROTO_ICMP: {
+        if (payload_len < sizeof(struct icmp_echo))
+            break;
+        struct icmp_echo *e = (struct icmp_echo *) payload;
+        if (e->type == ICMP_ECHO_REPLY)
+            net_ping_replies++;
+        break;
+    }
+    case IPPROTO_UDP:
+        if (to_us && payload_len >= sizeof(union udp_header))
+            udp_recv(src, dst, payload, payload_len);
+        break;
+    }
+}
+
+void net_recv(unsigned char *llc, unsigned int len) {
+    if (len < LLC_SNAP_LEN)
+        return;
+    unsigned int et = ntohs(*(const unsigned short *) (llc + LLC_SNAP_LEN - 2));
+    switch (et) {
+    case ETHERTYPE_ARP:
+        arp_recv(llc + LLC_SNAP_LEN, len - LLC_SNAP_LEN);
+        break;
+    case ETHERTYPE_IPV4: {
+        u8 *ip = llc + LLC_SNAP_LEN;
+        len -= LLC_SNAP_LEN;
+        if (len < sizeof(union ipv4_header))
+            return;
+        union ipv4_header *h = (union ipv4_header *) ip;
+        unsigned int total_len = ntohs(h->fields.total_len);
+        if (total_len > len)
+            return;
+        ipv4_recv(ip, total_len);
+        break;
+    }
+    default:
+        break;
     }
 }
 
@@ -147,12 +197,11 @@ void net_tick(void) {
         return;
 
     unsigned int now = ccount();
-    if (state == NET_IDLE) {
+    switch (state) {
+    case NET_IDLE:
         state = NET_ARP;
         last = now - PERIOD_ARP;
-    }
-
-    if (state == NET_ARP) {
+    case NET_ARP:
         if (have_gw) {
             state = NET_PING;
             last = now - PERIOD_PING;
@@ -164,10 +213,27 @@ void net_tick(void) {
             send_arp_request();
         }
         return;
+    case NET_PING:
+        if (!dns_sent && net_ping_replies > 0) {
+            dns_sent = 1;
+            dns_test_send();
+        }
+        if (now - last >= PERIOD_PING) {
+            last = now;
+            send_ping();
+        }
+        return;
     }
+}
 
-    if (state == NET_PING && now - last >= PERIOD_PING) {
-        last = now;
-        send_ping();
-    }
+// data must be at least len + 8 bytes long, as we prepend the SNAP header in place
+int net_send_to_gateway(unsigned char *data, unsigned int len) {
+    if (wpa_state != WPA_DONE || !have_gw)
+        return -1;
+    if (len > MTU - 8)
+        return -1;
+
+    memmove(data + LLC_SNAP_LEN, data, len);
+    put_snap(data, ETHERTYPE_IPV4);
+    return wifi_ccmp_tx(gw_mac, data, len + LLC_SNAP_LEN);
 }

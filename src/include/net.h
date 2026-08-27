@@ -5,8 +5,11 @@
    4-way handshake has installed keys. Called once per RX-poll iteration. */
 void net_tick(void);
 
-/* Delivers a decrypted LLC/SNAP payload (ARP or IP) to the stack. */
-void net_input(const unsigned char *llc, unsigned int len);
+/* Delivers a decrypted LLC/SNAP payload (ARP or IP) to the stack. Servicer
+   context. */
+void net_recv(unsigned char *llc, unsigned int len);
+
+int net_send_to_gateway(unsigned char *data, unsigned int len);
 
 extern volatile unsigned int net_ping_replies;
 
