@@ -6,15 +6,13 @@
 #include "wifi_wpa.h"
 #include "wifi_ccmp.h"
 #include "ap_secrets.h"
+#include "rng.h"
 
 extern unsigned char ap_bssid[6];
 extern const char ap_ssid[];
 extern unsigned char wifi_mac_addr[6];
 
 static const char passphrase[] = AP_PASS;
-
-/* ESP8266 hardware RNG. */
-#define WDEV_RNG   0x3ff20e44u
 
 volatile int wpa_state;
 unsigned char wpa_tk[16];
@@ -72,10 +70,7 @@ void wpa_begin(void) {
     if (wpa_state != WPA_IDLE)
         return;
     wpa_prep();
-    for (int i = 0; i < 32; i += 4) {
-        unsigned int r = READ_REG(WDEV_RNG);
-        snonce[i] = r; snonce[i+1] = r >> 8; snonce[i+2] = r >> 16; snonce[i+3] = r >> 24;
-    }
+    rng_fill(snonce, 32);
     wpa_state = WPA_WAIT_M1;
     kprintf_uart("wpa: armed, waiting for EAPOL msg1\n");
 }

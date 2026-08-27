@@ -71,6 +71,10 @@ SECTIONS
     *enable.o(.literal .text .literal.* .text.*)
     *wifi_fiq.o(.literal .text .literal.* .text.*)
     *handle_cputimer_intr.o(.literal .text .literal.* .text.*)
+    *wdt.o(.literal .text .literal.* .text.*)
+    *sched.o(.literal .text .literal.* .text.*)
+    *make_avail.o(.literal .text .literal.* .text.*)
+    *proc_queue.o(.literal .text .literal.* .text.*)
     *(.iram1 .iram1.*) /* catch stray IRAM_ATTR */
     *(.fini.literal)
     *(.fini)

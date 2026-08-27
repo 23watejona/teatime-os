@@ -7,7 +7,7 @@ sysInfoVector:
   movi.n	a0, 1
   wsr.exccause	a0
   call0	debug_handler
-	
+
   .section	.DebugExceptionVector.text,"ax",@progbits
 	.align	4
 debugExceptionVector:
@@ -30,12 +30,15 @@ KernelExceptionVector:
 UserExceptionVector:
     wsr.EXCSAVE1 a0 # save a0
     call0 _create_intr_frame
-    call0 _get_exccause # sets a2=exccause
+    call0 _get_exccause
+    mov.n a3, a1
     call0 syscall_handler
     call0 _restore_intr_frame
     rsr.EXCSAVE1 a0
     rfe
 
+    .align 4 # call0 needs a 4-aligned target or gas expands it to l32r+callx0,
+             # and vector literals land after the vector, out of l32r's reach
 _get_exccause:
     rsr a2, EXCCAUSE
     ret
@@ -43,14 +46,25 @@ _get_exccause:
   .section	.DoubleExceptionVector.text,"ax",@progbits
 	.align	4
 DoubleExceptionVector:
-  rsr a2, EPC1
-  addi a2,a2,3
-  wsr a2, EPC1
-  xsr a2, EXCSAVE1
-  call0 double_exc_handler 
-  rfi 1
+    # printing would fault again, so store breadcrumbs and let the wdt reset
+    # the stores live out in iram1, since literals placed after the vector are out of l32r's reach
+    j double_exc_halt
 
   .section	.iram1,"ax",@progbits
+  .align	4
+double_exc_halt:
+    movi a0, 0x60001200 # rtc ram survives the reset, so start() can print it
+    rsr.epc1 a2
+    s32i a2, a0, 4
+    rsr.exccause a2
+    s32i a2, a0, 8
+    # epc1 is stale on a double fault, so depc holds the faulting pc
+    rsr.depc a2
+    s32i a2, a0, 0xc
+    rsr.excvaddr a2
+    s32i a2, a0, 0x10
+1:  j 1b
+
   .align	4
 .global intr_enable
 intr_enable:
@@ -63,14 +77,34 @@ intr_enable:
   mov.n a2, a3
   ret.n
 
-# Level-3 NMI dispatch. On entry the vector has stashed the interrupted a0 in
-# EXCSAVE3 and a1 in EXCSAVE2. The handler runs on a dedicated stack (never the
-# interrupted task's), clears PS.EXCM so a fault inside the C handler traps
-# normally instead of double-faulting, preserves EPC3/EPS3 (rfi 3 reloads PS
-# from EPS3) plus the level-1 exception state the C code may disturb, re-arms the
-# NMI source as the very last write before rfi to prevent re-entry onto the
-# single dedicated stack, and returns with rfi 3.
+# Level-3 NMI dispatch. Vector stashes interrupted a0/a1 in EXCSAVE3/2; a fresh
+# entry saves the rest in the single static _nmi_frame and runs C with EXCM
+# clear. This is a true NMI (fires at any PS, arm gate never auto-disables), so
+# an event rising after the drain can nest a second entry any time before the
+# rfi. The entry guard makes that harmless:
+#   EPC3 in the restore block  -> rerun the restore (it only reads the frame)
+#   _nmi_active                -> resume the interrupted point via EXCSAVE3/2
+#   otherwise                  -> fresh entry
+# A bounce consumes the edge without draining; the tick's gate pulse remakes it.
+# No nest can land before the drain: the line is still high, so no new edge.
 drive_nmi:
+    rsr.epc3 a0
+    movi a1, .Lnmi_restore
+    bltu a0, a1, .Lnmi_chk_active
+    movi a1, .Lnmi_restore_end
+    bltu a0, a1, .Lnmi_restore
+.Lnmi_chk_active:
+    movi a0, _nmi_active
+    l32i a0, a0, 0
+    beqz a0, .Lnmi_fresh
+    rsr.EXCSAVE3 a0
+    rsr.EXCSAVE2 a1
+    rfi 3
+
+.Lnmi_fresh:
+    movi a0, _nmi_active
+    movi a1, 1
+    s32i a1, a0, 0
     movi a1, _nmi_frame
     rsr.EXCSAVE3 a0
     s32i a0, a1, 0x00
@@ -92,6 +126,8 @@ drive_nmi:
     s32i a15, a1, 0x3c
     rsr.epc3 a0
     s32i a0, a1, 0x40
+    movi a2, 0x60001200 # rtc ram survives the reset, so start() can print it
+    s32i a0, a2, 0
     rsr.eps3 a0
     s32i a0, a1, 0x44
     rsr.epc1 a0
@@ -110,6 +146,9 @@ drive_nmi:
     rsync
     call0 nmi_handler
 
+    # bounce restart point: everything to the rfi only reads _nmi_frame, so rerunning from here is safe
+.Lnmi_restore:
+    movi a1, _nmi_frame
     movi a0, 0x33 # excm set, so nothing can trap in the middle of the restore
     wsr.ps a0
     rsync
@@ -127,11 +166,9 @@ drive_nmi:
     wsr.eps3 a0
     l32i a0, a1, 0x40
     wsr.epc3 a0
-
-    movi a0, 0x3ff00000  # re-arm the NMI source last, after state is restored
-    movi a2, 1
+    movi a0, _nmi_active
+    movi a2, 0
     s32i a2, a0, 0
-
     l32i a2, a1, 0x08
     l32i a3, a1, 0x0c
     l32i a4, a1, 0x10
@@ -149,3 +186,4 @@ drive_nmi:
     l32i a0, a1, 0x00
     l32i a1, a1, 0x04
     rfi 3
+.Lnmi_restore_end:

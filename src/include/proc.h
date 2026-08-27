@@ -14,9 +14,13 @@
 #define PROC_MIN_PRIO 1
 #define PROC_MAX_PRIO 15
 
+/* stack-bottom canary, swept by sched() every tick */
+#define STK_CANARY(pid) (0xC0FFEE00u ^ (unsigned int)(pid))
+
 typedef struct proctab_entry {
     unsigned int status;
     unsigned int *stk_ptr;
+    unsigned int *stk_base; /* stack bottom word, holds STK_CANARY(pid) */
     int priority;
 } proctab_entry;
 
@@ -29,5 +33,8 @@ void enable(int mask);
 void sched(void);
 
 extern int create(void *func, unsigned int stack_size, int priority);
+
+/* must be called with interrupts off */
+extern void make_avail(int pid);
 
 #endif // PROC_H

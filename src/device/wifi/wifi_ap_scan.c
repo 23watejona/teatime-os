@@ -57,7 +57,9 @@ void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
         return;
 
     volatile unsigned char *bssid = &f[16];
-    if (bssid_known(bssid))
+    // a known target still falls through, so a rescan can republish its channel
+    int known = bssid_known(bssid);
+    if (known && !is_target_bssid(bssid))
         return;
 
     const volatile unsigned char *ssid = 0;
@@ -96,6 +98,9 @@ void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
 
     if (is_target_bssid(bssid) && channel > 0)
         wifi_target_channel = channel;
+
+    if (known)
+        return;
 
     bssid_remember(bssid);
 

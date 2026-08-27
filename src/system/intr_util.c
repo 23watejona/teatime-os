@@ -25,17 +25,25 @@ IRAM_ATTR void debug_handler() {
   }
 }
 
-void syscall_handler (unsigned int exccause, unsigned int int_cause) {
+IRAM_ATTR void syscall_handler (unsigned int exccause, unsigned int *frame) {
     unsigned int interrupt = 0;
     unsigned int intenable = 0;
     switch (exccause) {
         default: {
-            // illegal instruction / unhandled exccause — not recoverable;
-            // reboot cleanly instead of fault-looping.
-            unsigned int epc;
+            unsigned int epc, vaddr;
             asm("rsr.epc1 %0" : "=r"(epc));
-            kprintf_uart("\nFATAL exccause=%d epc1=%x -- rebooting\n",
-                         exccause, epc);
+            asm("rsr.excvaddr %0" : "=r"(vaddr));
+            // interrupted a0 and sp, from the frame layout in ctxsw.s
+            unsigned int a0 = frame[0x50 / 4];
+            unsigned int a1 = (unsigned int)frame + 96;
+            kprintf_uart("\nFATAL exccause=%d epc1=%x a0=%x a1=%x pid=%d "
+                         "excvaddr=%x -- rebooting\n",
+                         exccause, epc, a0, a1, curr_pid, vaddr);
+            // rtc ram survives the reboot, so start() prints these as fatal_*
+            WRITE_REG(0x60001214, epc);
+            WRITE_REG(0x60001218, exccause);
+            WRITE_REG(0x6000121c, a0);
+            WRITE_REG(0x60001220, a1);
             system_reboot();
         }
         case 1:

@@ -104,13 +104,23 @@ ctxsw:
     ret
 
 
+    # interrupt frame = the 80-byte ctxsw layout + EXCSAVE1 (interrupted a0) at
+    # 0x50; create() hand-builds only the ctxsw layout. Without the per-frame
+    # save, any other process's interrupt clobbers a suspended process's a0.
     .align 4
     .global _create_intr_frame
 _create_intr_frame:
-    addi sp, sp, -80
+    addi sp, sp, -96
     s32i a0, sp, 0x10
     SAVE_SREGS_L1
     SAVE_AREGS
+    rsr.excsave1 a0
+    s32i a0, sp, 0x50
+    # C handlers live in flash and flash fetches under EXCM=1 fault, so mask via
+    # INTLEVEL, never EXCM. The frame PS is restored before rfe.
+    movi a0, 0x21
+    wsr.ps a0
+    rsync
     l32i a0, sp, 0x10
     ret
 
@@ -118,10 +128,12 @@ _create_intr_frame:
     .global _restore_intr_frame
 _restore_intr_frame:
     s32i a0, sp, 0x10
+    l32i a0, sp, 0x50
+    wsr.excsave1 a0
     REST_AREGS
     REST_SREGS_L1
     l32i a0, sp, 0x10
-    addi sp, sp, 80
+    addi sp, sp, 96
     ret
 
 
@@ -130,8 +142,13 @@ _restore_intr_frame:
     # grows DOWN into the reserved space below it. Never the interrupted task's sp.
     .section .bss
     .align 16
+    .global _nmi_stack_bottom
 _nmi_stack_bottom:
     .space 1024
     .global _nmi_frame
 _nmi_frame:
     .space 0x60
+    # nonzero while an NMI entry is live outside the restore block
+    .global _nmi_active
+_nmi_active:
+    .space 4

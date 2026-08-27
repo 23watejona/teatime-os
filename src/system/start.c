@@ -8,15 +8,13 @@
 
 #define NULL_STK 1024
 #define INIT_STK 2048
+#define SERVICER_STK 4096 /* WPA HMAC peak + a tick's frames measured ~2112 */
 
 
 void ctxsw(unsigned int **, unsigned int **);
 int initmem(void);
 char *alloc_stack(unsigned int);
 void _set_vec_base(void);
-void sched(void);
-void make_avail(int);
-void unused();
 int init_cpu_clk(unsigned int clk_rate_mhz);
 void init_cpu_timer(void);
 void init_wifi_clk(void);
@@ -41,9 +39,11 @@ unsigned int intr_unmask(unsigned int);
 
 extern queue_entry *avail_list;
 extern unsigned int _bss_start, _bss_end;
+extern unsigned int _nmi_stack_bottom;
 
 proctab_entry proctab[NUM_PROC] = {0};
 int curr_pid = 0;
+unsigned int boot_reset_cause;
 
 #define CACHE_CTRL  0x3ff0000c
 #define CACHE_CTRL2 0x3ff00024
@@ -93,6 +93,7 @@ IRAM_ATTR void start ( void )
     BUSY_WAIT();
     init_cpu_clk(80);
     initmem();
+    boot_reset_cause = READ_REG(0x60000714) & 0xf; // 4 is the hardware wdt; read after the bss clear above, which would wipe it
     
     alloc_stack(NULL_STK);
 
@@ -117,6 +118,24 @@ IRAM_ATTR void start ( void )
         wait_us(1000000);
     }
     kprintf_uart("\nproceeding\n");
+    // the breadcrumbs live in rtc ram and survive wdt resets, so zero them after printing
+    kprintf_uart("boot: reset cause %d nmi_epc3=%x dexc_epc1=%x dexc_cause=%x "
+                 "dexc_depc=%x dexc_vaddr=%x fatal_epc1=%x fatal_cause=%x "
+                 "fatal_a0=%x fatal_sp=%x\n",
+                 boot_reset_cause, READ_REG(0x60001200), READ_REG(0x60001204),
+                 READ_REG(0x60001208), READ_REG(0x6000120c),
+                 READ_REG(0x60001210), READ_REG(0x60001214),
+                 READ_REG(0x60001218), READ_REG(0x6000121c),
+                 READ_REG(0x60001220));
+    WRITE_REG(0x60001200, 0);
+    WRITE_REG(0x60001204, 0);
+    WRITE_REG(0x60001208, 0);
+    WRITE_REG(0x6000120c, 0);
+    WRITE_REG(0x60001210, 0);
+    WRITE_REG(0x60001214, 0);
+    WRITE_REG(0x60001218, 0);
+    WRITE_REG(0x6000121c, 0);
+    WRITE_REG(0x60001220, 0);
 
     wdt_feed();
     wifi_secrets_init();
@@ -133,8 +152,8 @@ IRAM_ATTR void start ( void )
     init_wifi_mac();
     kprintf_uart("wifi: mac_addr\n");
     init_wifi_mac_addr();
-    // Arm the WiFi NMI source (bit0). Its level-3 handler (drive_nmi, intr.s)
-    // services the MAC RX/TX-done events; the RX servicer still drains the ring.
+    _nmi_stack_bottom = STK_CANARY(NUM_PROC);
+    // arm the wifi nmi gate; from here on only the tick pulses it
     WRITE_REG(0x3ff00000, (READ_REG(0x3ff00000) & 0xffffffe0) | 1);
     kprintf_uart("wifi: rx_enable\n");
     wifi_mac_rx_enable();
@@ -145,7 +164,7 @@ IRAM_ATTR void start ( void )
     kprintf_uart("created main as pid %d\n", pid);
     make_avail(pid);
 
-    wifi_rx_servicer_pid = create(wifi_rx_servicer, INIT_STK, 10);
+    wifi_rx_servicer_pid = create(wifi_rx_servicer, SERVICER_STK, 10);
     make_avail(wifi_rx_servicer_pid);
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)

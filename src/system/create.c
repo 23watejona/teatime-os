@@ -70,6 +70,8 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
 
     proctab[pid].status = PROC_AVAIL;
     proctab[pid].stk_ptr = (unsigned int *)stack_addr;
+    proctab[pid].stk_base = (unsigned int *)stk;
+    *proctab[pid].stk_base = STK_CANARY(pid);
     proctab[pid].priority = priority;
     
     return pid;

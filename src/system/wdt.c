@@ -21,12 +21,14 @@ void wdt_enable(void) {
     wdt_feed();
 }
 void system_reboot(void) {
-    WRITE_REG_UNMASK(WDT_CTL, 2);
+    WRITE_REG_UNMASK(WDT_CTL, 1);
     WRITE_REG(WDT_OP, 1);
     WRITE_REG(WDT_OP_ND, 1);
     WRITE_REG_MASK(WDT_CTL, 0x38);
     WRITE_REG_UNMASK(WDT_CTL, 6);
     WRITE_REG_MASK(WDT_CTL, 1);
+    // the feed latches the new stage, so without it the old ~5 s timeout runs first
+    wdt_feed();
     for (;;)
         ;
 }
