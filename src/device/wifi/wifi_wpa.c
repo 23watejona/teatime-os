@@ -134,7 +134,11 @@ static void send_eapol(unsigned int keyinfo, const u8 *nonce,
     memcpy(e + E_MIC, mic, 16);
 
     n += 99 + kdlen;
-    wifi_tx_frame(f, n);
+    // before WPA_DONE no key is installed so the 4-way goes out in the clear, but a group-rekey reply must ride the encrypted link like any other data
+    if (wpa_state == WPA_DONE)
+        wifi_ccmp_tx(ap_bssid, f + 24, n - 24);
+    else
+        wifi_tx_frame(f, n);
 }
 
 static volatile u8 *find_eapol(volatile u8 *f, unsigned int flen) {
@@ -231,6 +235,47 @@ static void handle_m3(volatile u8 *e, unsigned int elen) {
         kprintf_uart("wpa: msg3 MIC ok, msg4 sent — 4-way COMPLETE (gtk_len=%u id=%u)\n",
                      wpa_gtk_len, wpa_gtk_id);
     }
+}
+
+static void handle_group_m1(volatile u8 *e, unsigned int elen) {
+    if (!mic_ok(e, elen)) {
+        kprintf_uart("wpa: group msg1 MIC FAIL\n");
+        return;
+    }
+    memcpy(replay, (const void *)(e + E_REPLAY), 8);
+
+    unsigned int kdlen = (e[E_KDLEN] << 8) | e[E_KDLEN + 1];
+    if (kdlen < 16 || (kdlen % 8) != 0 || kdlen > 256 || E_KEYDATA + kdlen > elen)
+        return;
+    u8 wrapped[256], plain[256];
+    memcpy(wrapped, (const void *)(e + E_KEYDATA), kdlen);
+    if (aes_unwrap(KEK, 16, kdlen / 8 - 1, wrapped, plain) != 0)
+        return;
+    extract_gtk(plain, kdlen - 8);
+    wifi_ccmp_install_gtk();
+
+    send_eapol(2 | KI_MIC | KI_SECURE, 0, 0, 0);
+    kprintf_uart("wpa: GTK rekeyed (len=%u id=%u), msg2 sent\n", wpa_gtk_len, wpa_gtk_id);
+}
+
+void wifi_wpa_eapol(unsigned char *llc, unsigned int len) {
+    if (wpa_state != WPA_DONE)
+        return;
+    if (len < 8 + 99)
+        return;
+    u8 *e = llc + 8;
+    if (e[E_TYPE] != 0x03)
+        return;
+    unsigned int ki = (e[E_KEYINFO] << 8) | e[E_KEYINFO + 1];
+    unsigned int elen = 4 + ((e[E_BODYLEN] << 8) | e[E_BODYLEN + 1]);
+    if (8 + elen > len)
+        return;
+    if ((ki & (KI_PAIRWISE | KI_MIC | KI_ACK)) == (KI_MIC | KI_ACK))
+        handle_group_m1(e, elen);
+}
+
+void wpa_reset(void) {
+    wpa_state = WPA_IDLE;
 }
 
 void wifi_wpa_input(volatile unsigned char *buf, unsigned int len) {

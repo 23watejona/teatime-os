@@ -4,6 +4,7 @@
 #include "wifi_tx.h"
 #include "wifi_sta.h"
 #include "wifi_wpa.h"
+#include "wifi_ccmp.h"
 #include "ap_secrets.h"
 
 extern int wifi_locked_channel;
@@ -11,6 +12,8 @@ extern unsigned char wifi_mac_addr[6];
 extern volatile int wifi_target_channel;
 
 #define RETRY_PERIOD   24000000u /* ~300 ms at 80 MHz */
+#define BEACON_LOSS    400000000u /* ~5 s without a frame from the AP */
+#define WPA_STALL      800000000u /* ~10 s associated but 4-way incomplete */
 
 extern unsigned char ap_bssid[6];
 const char ap_ssid[] = AP_SSID;
@@ -20,6 +23,23 @@ volatile unsigned int wifi_sta_aid;
 
 static unsigned int last_tx;
 static unsigned int seq;
+static unsigned int last_heard;
+static unsigned int run_since;
+
+// beacon loss means the ap may have moved channel or vanished, so the lock is dropped and the scanner hunts again
+static void link_down(int rescan) {
+    wifi_ccmp_clear_keys();
+    wpa_reset();
+    wifi_sta_aid = 0;
+    if (rescan) {
+        wifi_target_channel = 0;
+        wifi_locked_channel = 0;
+        wifi_sta_state = STA_INIT;
+    } else {
+        wifi_sta_state = STA_AUTH;
+        last_tx = ccount() - RETRY_PERIOD;
+    }
+}
 
 // with both address-match units masking every byte the mac acks nothing and the ap abandons the join, so one unit is pointed at our mac and one at the bssid with a full mask
 static void program_rx_filter(void) {
@@ -113,16 +133,31 @@ void wifi_station_tick(void) {
         last_tx = now - RETRY_PERIOD;
         return;
     case STA_AUTH:
-        if (now - last_tx < RETRY_PERIOD)
-            return;
-        last_tx = now;
-        send_auth();
-        return;
     case STA_ASSOC:
+        if (now - last_heard >= BEACON_LOSS) {
+            kprintf_uart("sta: beacon loss, rescanning\n");
+            link_down(1);
+            return;
+        }
         if (now - last_tx < RETRY_PERIOD)
             return;
         last_tx = now;
-        send_assoc();
+        if (wifi_sta_state == STA_AUTH)
+            send_auth();
+        else
+            send_assoc();
+        return;
+    case STA_RUN:
+        if (now - last_heard >= BEACON_LOSS) {
+            kprintf_uart("sta: beacon loss, rescanning\n");
+            link_down(1);
+            return;
+        }
+        // the 4-way only advances on ap retransmits, so once the ap gives up only a fresh auth restarts it
+        if (wpa_state != WPA_DONE && now - run_since >= WPA_STALL) {
+            kprintf_uart("sta: handshake stalled, re-authenticating\n");
+            link_down(0);
+        }
         return;
     default:
         return;
@@ -144,6 +179,14 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
         return;
     volatile unsigned char *f = buf + 12;
 
+    // beacons are broadcast and fail the directed check below, so liveness is tracked on the transmitter address alone
+    int a2_ours = 1;
+    for (int i = 0; i < 6; i++)
+        if (f[10 + i] != ap_bssid[i])
+            a2_ours = 0;
+    if (a2_ours)
+        last_heard = ccount();
+
     unsigned int fc0 = f[0];
     if (((fc0 >> 2) & 3) != 0)
         return;
@@ -154,8 +197,10 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
     unsigned int body = 24;
 
     if (subtype == 12 || subtype == 10) {
-        kprintf_uart("sta: %s reason=%u\n",
+        kprintf_uart("sta: %s reason=%u, re-authenticating\n",
                      subtype == 12 ? "DEAUTH" : "DISASSOC", f[body] | (f[body + 1] << 8));
+        if (wifi_sta_state != STA_INIT)
+            link_down(0);
         return;
     }
 
@@ -183,6 +228,7 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
         if (wifi_sta_state == STA_ASSOC) {
             wifi_sta_aid = aid;
             wifi_sta_state = STA_RUN;
+            last_heard = run_since = ccount();
             kprintf_uart("sta: ASSOCIATED aid=%u\n", aid);
             wpa_begin();
         }

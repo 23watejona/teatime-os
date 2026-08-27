@@ -27,6 +27,10 @@ static void write_key(unsigned int slot, unsigned int flagword, const u8 *key) {
     WRITE_REG(KEY_ENABLE, READ_REG(KEY_ENABLE) | (1u << slot));
 }
 
+/* 48-bit CCMP packet number for the pairwise TK. Must strictly increase per
+   MPDU under one key or the AP discards frames as replays; starts at 1. */
+static unsigned int pn_lo = 1, pn_hi;
+
 void wifi_ccmp_install_keys(void) {
     /* The slot number, not the flag word, selects the key class the HW routes a
        frame to: a group frame (multicast A1) draws its key from a group-class slot
@@ -38,15 +42,23 @@ void wifi_ccmp_install_keys(void) {
 
     /* Datapath crypto engine, enabled after the slots: HW encrypt on TX, decrypt on RX. */
     WRITE_REG(0x3ff20800, CCMP_ENGINE);
+
+    /* A fresh TK starts a fresh PN space. */
+    pn_lo = 1;
+    pn_hi = 0;
     kprintf_uart("ccmp: keys installed (enable=%x eng=%x)\n",
                  READ_REG(KEY_ENABLE), READ_REG(0x3ff20800));
 }
 
-static unsigned int tx_seq;
+void wifi_ccmp_install_gtk(void) {
+    write_key(2, 0x40cc0000u, wpa_gtk);
+}
 
-/* 48-bit CCMP packet number for the pairwise TK. Must strictly increase per
-   MPDU under one key or the AP discards frames as replays; starts at 1. */
-static unsigned int pn_lo = 1, pn_hi;
+void wifi_ccmp_clear_keys(void) {
+    WRITE_REG(KEY_ENABLE, READ_REG(KEY_ENABLE) & ~((1u << 2) | (1u << 6)));
+}
+
+static unsigned int tx_seq;
 
 /* Build and transmit a CCMP data frame carrying `payload` to `da`. The MAC
    encrypts the payload and appends the MIC in hardware. */

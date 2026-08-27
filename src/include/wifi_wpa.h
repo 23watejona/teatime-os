@@ -13,6 +13,13 @@ void wpa_begin(void);
    Non-EAPOL frames, and frames received before wpa_begin(), are ignored. */
 void wifi_wpa_input(volatile unsigned char *buf, unsigned int len);
 
+/* Delivers a decrypted LLC/SNAP payload carrying EAPOL (ethertype 0x888e) to
+   the group-key handshake. Only meaningful once the 4-way is complete. */
+void wifi_wpa_eapol(unsigned char *llc, unsigned int len);
+
+/* Drops the handshake state back to WPA_IDLE for a re-join; the PMK is kept. */
+void wpa_reset(void);
+
 enum {
     WPA_IDLE,
     WPA_WAIT_M1,

@@ -14,6 +14,7 @@
 extern void wifi_set_channel(unsigned int ch);
 extern void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen);
 extern void wifi_wpa_input(volatile unsigned char *buf, unsigned int len);
+extern void wifi_wpa_eapol(unsigned char *llc, unsigned int len);
 extern int wifi_ccmp_rx(volatile unsigned char *buf, unsigned int len, unsigned char *out);
 extern void net_input(const unsigned char *llc, unsigned int len);
 extern void net_tick(void);
@@ -34,8 +35,12 @@ static void rx_dump(volatile struct lldesc *d) {
 
     static unsigned char llc[2048];
     int nl = wifi_ccmp_rx(p, d->length, llc);
-    if (nl > 0)
-        net_input(llc, (unsigned int) nl);
+    if (nl > 0) {
+        if (nl >= 8 && llc[6] == 0x88 && llc[7] == 0x8e)
+            wifi_wpa_eapol(llc, (unsigned int) nl);
+        else
+            net_input(llc, (unsigned int) nl);
+    }
 }
 
 static void rx_refill(volatile struct lldesc *d) {
