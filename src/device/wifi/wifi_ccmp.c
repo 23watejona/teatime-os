@@ -32,15 +32,10 @@ static void write_key(unsigned int slot, unsigned int flagword, const u8 *key) {
 static unsigned int pn_lo = 1, pn_hi;
 
 void wifi_ccmp_install_keys(void) {
-    /* The slot number, not the flag word, selects the key class the HW routes a
-       frame to: a group frame (multicast A1) draws its key from a group-class slot
-       (2-5) matched on A2=BSSID, a unicast frame from a pairwise-class slot (6-7).
-       So the GTK goes in slot 2 and the PTK in slot 6; swap them and the HW decrypts
-       group frames with the pairwise TK. */
-    write_key(2, 0x40cc0000u, wpa_gtk); /* group key -> group-class slot 2 */
-    write_key(6, 0x004c0000u, wpa_tk); /* pairwise key -> pairwise-class slot 6 */
+    // the slot number, not the flag word, picks the key class: group frames draw from slots 2-5 matched on a2=bssid and unicast from 6-7, so swapping them makes the hw decrypt group frames with the pairwise key
+    write_key(2, 0x004c0000u | ((wpa_gtk_id & 1) << 24), wpa_gtk);
+    write_key(6, 0x004c0000u, wpa_tk);
 
-    /* Datapath crypto engine, enabled after the slots: HW encrypt on TX, decrypt on RX. */
     WRITE_REG(0x3ff20800, CCMP_ENGINE);
 
     /* A fresh TK starts a fresh PN space. */
@@ -51,7 +46,7 @@ void wifi_ccmp_install_keys(void) {
 }
 
 void wifi_ccmp_install_gtk(void) {
-    write_key(2, 0x40cc0000u, wpa_gtk);
+    write_key(2, 0x004c0000u | ((wpa_gtk_id & 1) << 24), wpa_gtk);
 }
 
 void wifi_ccmp_clear_keys(void) {
