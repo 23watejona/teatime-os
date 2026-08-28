@@ -13,7 +13,7 @@
 #define TX_GO_BITS     0xc0000000u
 
 #define TX_QUEUE       0u
-#define TX_RATE        0u /* 1 Mbps CCK; no OFDM PLCP word */
+#define TX_RATE        3u /* 11 Mbps CCK; no OFDM PLCP word */
 /* Descriptor words for a protected (CCMP) data frame. The engine picks the TX key
    by the slot index carried in DC8 bits 16-23 — unlike RX, which address-matches
    A2 — so the pairwise slot must be named here, or the frame encrypts against an
@@ -24,6 +24,7 @@
 #define TX_DD4         0x003ff000u /* frame lifetime; zero can age the frame out before TX */
 
 extern unsigned char wifi_mac_addr[6];
+extern volatile unsigned int wifi_fiq_tx_count;
 
 static struct lldesc tx_desc __attribute__((aligned(4)));
 static unsigned char tx_buf[1600] __attribute__((aligned(4)));
@@ -67,7 +68,7 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
 
     unsigned int daddr = (unsigned int) &tx_desc & 0x3ffffu;
 
-    WRITE_REG(MAC_INT_CLEAR, TX_DONE_BIT);
+    unsigned int prev_tx_count = wifi_fiq_tx_count;
 
     __asm__ volatile("memw");
     WRITE_REG(B + 0x08, dc8);
@@ -82,8 +83,7 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
        descriptor before the DMA has read it. */
     int rc = 0;
     for (int t = 0; t < 200000; t++) {
-        if (READ_REG(MAC_INT_EVENT) & TX_DONE_BIT) {
-            WRITE_REG(MAC_INT_CLEAR, TX_DONE_BIT);
+        if (wifi_fiq_tx_count != prev_tx_count) {
             wifi_tx_done_count++;
             rc = 1;
             break;
