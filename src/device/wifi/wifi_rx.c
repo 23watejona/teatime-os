@@ -22,13 +22,8 @@ extern void wifi_wpa_eapol(unsigned char *llc, unsigned int len);
 extern int wifi_ccmp_rx(volatile unsigned char *buf, unsigned int len, unsigned char *out);
 extern void net_recv(unsigned char *llc, unsigned int len);
 extern void net_tick(void);
-extern int disable(void);
-extern void enable(int mask);
-extern void sched(void);
-extern volatile unsigned int wifi_rx_pending;
 
 int wifi_rx_servicer_pid = -1;
-volatile unsigned int wifi_tick_pending;
 volatile unsigned int wifi_rx_dropped;
 
 // zero means keep hopping channels 1..13
@@ -108,18 +103,11 @@ static void rx_dump(unsigned char *p, unsigned int len) {
     }
 }
 
-/* Wakes may be spurious. Clear the wake flags before consuming, and re-check
-   them under the mask before parking. */
 void wifi_rx_servicer(void) {
     unsigned int ch = 1;
     int locked_now = 0;
     unsigned int last = ccount();
     while (1) {
-        int m = disable();
-        wifi_rx_pending = 0;
-        wifi_tick_pending = 0;
-        enable(m);
-
         while (stage_tail != stage_head) {
             struct rx_stage *s = &stage[stage_tail & (STAGE_SLOTS - 1)];
             rx_dump(s->buf, s->len);
@@ -142,11 +130,8 @@ void wifi_rx_servicer(void) {
             }
         }
 
-        m = disable();
-        if (!wifi_rx_pending && !wifi_tick_pending) {
-            proctab[wifi_rx_servicer_pid].status = PROC_IO_WAIT;
-            sched();
-        }
-        enable(m);
+        /* The NMI cannot wake this process; a frame staged after the drain is
+           handled on the next tick. */
+        io_wait();
     }
 }

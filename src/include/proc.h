@@ -38,6 +38,13 @@ extern int create(void *func, unsigned int stack_size, int priority);
 /* must be called with interrupts off */
 extern void make_avail(int pid);
 
+void io_wait_init(void);
+/* may be spurious, re-check the condition on wake */
+extern void io_wait(void);
+/* NMI-safe: only sets a flag; waiters wake at the next clock tick */
+extern void io_signal(void);
+extern void io_clock(void);
+
 #define NSEM 8
 
 void sem_init(void);

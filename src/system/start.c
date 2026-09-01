@@ -107,6 +107,7 @@ IRAM_ATTR void start ( void )
     curr_pid = 0;
     avail_list = new_queue();
     sem_init();
+    io_wait_init();
     make_avail(NULL_PROC);
 
     

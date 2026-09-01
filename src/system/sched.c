@@ -7,11 +7,6 @@
 extern unsigned int _nmi_stack_bottom;
 extern void ctxsw(unsigned int **, unsigned int **);
 extern queue_entry *avail_list;
-extern volatile unsigned int wifi_rx_pending;
-extern volatile unsigned int wifi_tick_pending;
-extern int wifi_rx_servicer_pid;
-extern int disable(void);
-extern void enable(int mask);
 
 // not iram: excm is clear in handler context, so a flash call from sched is fine
 static void stk_smash(int pid, unsigned int val) {
@@ -29,13 +24,6 @@ IRAM_ATTR void sched() {
     }
     if (_nmi_stack_bottom != STK_CANARY(NUM_PROC)) // the nmi stack has no proctab row, so its canary takes the pid after the last
         stk_smash(NUM_PROC, _nmi_stack_bottom);
-
-    if ((wifi_rx_pending || wifi_tick_pending) && wifi_rx_servicer_pid >= 0 &&
-        proctab[wifi_rx_servicer_pid].status == PROC_IO_WAIT) {
-        wifi_rx_pending = 0;
-        wifi_tick_pending = 0;
-        make_avail(wifi_rx_servicer_pid);
-    }
 
     proctab_entry *old_proc = &proctab[curr_pid];
     proctab_entry *new_proc = NULL;

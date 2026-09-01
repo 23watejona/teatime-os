@@ -8,9 +8,9 @@
 #define FIQ_MAC_TIMER (1u << 27)
 
 extern unsigned int wifi_rx_nmi_drain(void);
+extern void io_signal(void);
 
 volatile unsigned int wifi_fiq_tx_count;
-volatile unsigned int wifi_rx_pending;
 
 // unconsumed rx descriptors hold the event line, so the drain has to run before the status clear
 IRAM_ATTR void wifi_fiq_dispatch(void) {
@@ -21,7 +21,7 @@ IRAM_ATTR void wifi_fiq_dispatch(void) {
         wifi_fiq_tx_count++;
 
     if (wifi_rx_nmi_drain())
-        wifi_rx_pending = 1;
+        io_signal();
 
     WRITE_REG(MAC_INT_CLEAR, status);
 }
