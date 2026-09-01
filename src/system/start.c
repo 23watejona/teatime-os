@@ -33,6 +33,7 @@ void wifi_set_channel(int);
 void startup_proc(void);
 void wifi_rx_servicer(void);
 void main(void);
+void dev_init(void);
 int disable();
 
 extern int wifi_rx_servicer_pid;
@@ -181,6 +182,7 @@ IRAM_ATTR void start ( void )
     make_avail(tcp_timer_pid);
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
+    dev_init();
     init_cpu_timer();
     while (1) {
         asm("waiti 0");

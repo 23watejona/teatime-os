@@ -1,12 +1,12 @@
 #include "stdarg.h"
 #include "uart.h"
+#include "dev.h"
+#include "proc.h"
 
 char *itoau(int, char *, int);
 char *itoa(int, char *, int);
 
-inline __attribute__((always_inline)) unsigned int uart0_tx_fifo_free() {
-    return TX_FIFO_SIZE - uart0.status.tx_fifo_count;
-}
+static int tx_mutex;
 
 inline __attribute__((always_inline)) unsigned int uart0_tx_fifo_size() {
     return uart0.status.tx_fifo_count;
@@ -80,3 +80,21 @@ void kprintf_uart(char *f, ...) {
     uart0_flush();
 }
 
+static int uart_write(struct dev *d, const void *buf, unsigned int n) {
+    const unsigned char *in = buf;
+    mutex_lock(tx_mutex);
+    for (unsigned int i = 0; i < n; i++) {
+        while (uart0_tx_fifo_full());
+        uart0.fifo.rw = in[i];
+    }
+    mutex_unlock(tx_mutex);
+    return n;
+}
+
+const struct dev_ops uart_ops = {
+    .write = uart_write,
+};
+
+void uart_init(void) {
+    tx_mutex = mutex_create();
+}

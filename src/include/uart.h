@@ -6,6 +6,10 @@
 void kprintf_uart(char *f, ...);
 void kputc_uart(int c);
 
+struct dev_ops;
+extern const struct dev_ops uart_ops;
+void uart_init(void);
+
 struct uart_ctrl {
     struct {
         char rw;
@@ -119,7 +123,7 @@ struct uart_ctrl {
     unsigned int id;
 };
 
-extern struct uart_ctrl uart0;
+extern volatile struct uart_ctrl uart0;
 
 #define TX_FIFO_SIZE (127) // it's actually 128 but we give it a byte of wiggle
 #define RX_FIFO_SIZE (127) // it's actually 128 but we give it a byte of wiggle

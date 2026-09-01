@@ -44,7 +44,7 @@ extern void io_wait(void);
 extern void io_signal(void);
 extern void io_clock(void);
 
-#define NSEM 8
+#define NSEM 16
 
 void sem_init(void);
 int sem_create(int initial);

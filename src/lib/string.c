@@ -35,3 +35,11 @@ unsigned long strlen(const char *s) {
     while (s[n]) n++;
     return n;
 }
+
+int strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return (unsigned char)*a - (unsigned char)*b;
+}

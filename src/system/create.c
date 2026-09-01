@@ -1,5 +1,6 @@
 #include "uart.h"
 #include "proc.h"
+#include "intr.h"
 
 extern int initmem(void);
 extern char *alloc_stack(unsigned int);
@@ -63,7 +64,7 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
     frame->address_regs.reg.a2 = (unsigned int) funcaddr;
     frame->address_regs.reg.a1 = (unsigned int) stack_addr;
     frame->address_regs.reg.a0 = (unsigned int) start_proc;
-    frame->intenable = 0x40; // bit 6 = clock interrupt
+    frame->intenable = PROC_INTENABLE;
     frame->sar = 0;
     frame->ps = 0;
     frame->epc1 = (unsigned int)start_proc;

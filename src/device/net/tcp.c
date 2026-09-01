@@ -148,7 +148,7 @@ static void send_new(u8 flags, const u8 *data, unsigned int len) {
     send_unacked();
 }
 
-static void close(void) {
+static void disconnect(void) {
     unsigned short port = tcp_ctrl.local_port;
     struct tcp_events ev = tcp_ctrl.ev;
     int sender = tcp_ctrl.sender;
@@ -198,7 +198,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
     if (h->flags & FLAG_RST) {
         if (SEQ_LEQ(tcp_ctrl.rcv_nxt, seq)
             && SEQ_LT(seq, tcp_ctrl.rcv_nxt + TCP_WINDOW)) {
-            close();
+            disconnect();
             tcp_ctrl.ev.closed(-1);
         }
         return;
@@ -224,7 +224,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             } else if (tcp_ctrl.state == FIN_WAIT_1) {
                 tcp_ctrl.state = FIN_WAIT_2;
             } else if (tcp_ctrl.state == LAST_ACK) {
-                close();
+                disconnect();
                 tcp_ctrl.ev.closed(0);
                 return;
             }
@@ -255,7 +255,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         } else if (tcp_ctrl.state == FIN_WAIT_2) {
             tcp_ctrl.rcv_nxt += 1;
             send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
-            close();
+            disconnect();
             tcp_ctrl.ev.closed(0);
         }
     }
@@ -305,7 +305,7 @@ static void tcp_tick(void) {
     if (tcp_ctrl.snd_una != tcp_ctrl.snd_nxt
         && ccount() - tcp_ctrl.last_send >= tcp_ctrl.rto_cycles) {
         if (tcp_ctrl.retries >= MAX_RETRIES) {
-            close();
+            disconnect();
             tcp_ctrl.ev.closed(-1);
         } else {
             tcp_ctrl.retries += 1;
