@@ -1,6 +1,8 @@
 #include "uart.h"
 #include "proc.h"
 
+void dns_test_proc(void);
+
 extern int disable(void);
 extern void enable(int mask);
 
@@ -30,6 +32,13 @@ void main(void)
     if (pid >= 0) {
         int m = disable();
         make_avail(pid);
+        enable(m);
+    }
+
+    int dns_test_pid = create(dns_test_proc, 2048, 5);
+    if (dns_test_pid >= 0) {
+        int m = disable();
+        make_avail(dns_test_pid);
         enable(m);
     }
     while (1)

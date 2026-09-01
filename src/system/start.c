@@ -5,6 +5,7 @@
 #include "proc_queue.h"
 #include "wait.h"
 #include "wdt.h"
+#include "net.h"
 
 #define NULL_STK 1024
 #define INIT_STK 2048
@@ -108,6 +109,7 @@ IRAM_ATTR void start ( void )
     avail_list = new_queue();
     sem_init();
     io_wait_init();
+    ipv4_init();
     make_avail(NULL_PROC);
 
     
@@ -168,6 +170,9 @@ IRAM_ATTR void start ( void )
 
     wifi_rx_servicer_pid = create(wifi_rx_servicer, SERVICER_STK, 10);
     make_avail(wifi_rx_servicer_pid);
+
+    int ipv4_pid = create(ipv4_proc, SERVICER_STK, 8);
+    make_avail(ipv4_pid);
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
     init_cpu_timer();

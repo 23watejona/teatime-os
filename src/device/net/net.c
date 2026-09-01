@@ -6,6 +6,7 @@
 #include "net.h"
 #include "ipv4.h"
 #include "udp.h"
+#include "icmp.h"
 
 #define MTU (1518)
 
@@ -40,23 +41,11 @@ struct arp_pkt {
     struct ipv4_addr target_ip;
 } __attribute__((packed));
 
-struct icmp_echo {
-    u8 type;
-    u8 code;
-    unsigned short checksum;
-    unsigned short ident;
-    unsigned short seq;
-} __attribute__((packed));
-
-volatile unsigned int net_ping_replies;
 static unsigned int icmp_seq;
 
 enum { NET_IDLE, NET_ARP, NET_PING };
 static int state;
 static unsigned int last;
-static int dns_sent;
-
-void dns_test_send(void);
 
 static unsigned int ccount(void) {
     unsigned int c;
@@ -139,34 +128,6 @@ static void arp_recv(u8 *payload, unsigned int len) {
     }
 }
 
-static void ipv4_recv(u8 *buf, unsigned int len) {
-    union ipv4_header *h = (union ipv4_header *) buf;
-    unsigned int ihl = (h->fields.version_ihl & 0x0f) * 4;
-    if (ihl < sizeof(union ipv4_header) || len < ihl)
-        return;
-    unsigned int payload_len = len - ihl;
-    u8 *payload = buf + ihl;
-    struct ipv4_addr src;
-    struct ipv4_addr dst;
-    src.word = h->fields.src_addr;
-    dst.word = h->fields.dest_addr;
-    int to_us = dst.word == local_ip.word;
-    switch (h->fields.protocol) {
-    case IPPROTO_ICMP: {
-        if (payload_len < sizeof(struct icmp_echo))
-            break;
-        struct icmp_echo *e = (struct icmp_echo *) payload;
-        if (e->type == ICMP_ECHO_REPLY)
-            net_ping_replies++;
-        break;
-    }
-    case IPPROTO_UDP:
-        if (to_us && payload_len >= sizeof(union udp_header))
-            udp_recv(src, dst, payload, payload_len);
-        break;
-    }
-}
-
 void net_recv(unsigned char *llc, unsigned int len) {
     if (len < LLC_SNAP_LEN)
         return;
@@ -184,7 +145,7 @@ void net_recv(unsigned char *llc, unsigned int len) {
         unsigned int total_len = ntohs(h->fields.total_len);
         if (total_len > len)
             return;
-        ipv4_recv(ip, total_len);
+        ipv4_enqueue(ip, total_len);
         break;
     }
     default:
@@ -214,10 +175,6 @@ void net_tick(void) {
         }
         return;
     case NET_PING:
-        if (!dns_sent && net_ping_replies > 0) {
-            dns_sent = 1;
-            dns_test_send();
-        }
         if (now - last >= PERIOD_PING) {
             last = now;
             send_ping();

@@ -3,8 +3,6 @@
 
 #define IPPROTO_ICMP 1
 #define IPPROTO_UDP  17
-#define ICMP_ECHO_REQUEST 8
-#define ICMP_ECHO_REPLY   0
 
 struct ipv4_addr {
     union {
@@ -50,5 +48,15 @@ unsigned short checksum(const void *addr, int count, unsigned int start);
 
 int send_ipv4_raw(struct ipv4_addr src, struct ipv4_addr dst, unsigned char protocol,
                   unsigned char *payload, unsigned int payload_len);
+
+void ipv4_init(void);
+
+/* Drains the RX ring and runs every L3 receive path in process context, so a
+   receive path may block on a send. */
+void ipv4_proc(void);
+
+/* Servicer-only producer. Copies the packet (already trimmed to its total
+   length) into the ring; drops when full. */
+void ipv4_enqueue(const unsigned char *pkt, unsigned int len);
 
 #endif
