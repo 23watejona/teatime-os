@@ -11,6 +11,7 @@
 #define ESTABLISHED 2
 #define CLOSE_WAIT 3
 
+#define FLAG_FIN 0x01
 #define FLAG_SYN 0x02
 #define FLAG_RST 0x04
 #define FLAG_ACK 0x10
@@ -165,6 +166,15 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         || ntohs(h->dst_port) != tcp_ctrl.local_port)
         return;
 
+    if (h->flags & FLAG_RST) {
+        if (SEQ_LEQ(tcp_ctrl.rcv_nxt, seq)
+            && SEQ_LT(seq, tcp_ctrl.rcv_nxt + TCP_WINDOW)) {
+            close();
+            tcp_ctrl.ev.closed(-1);
+        }
+        return;
+    }
+
     if ((h->flags & FLAG_SYN) && tcp_ctrl.state == SYN_RCVD) {
         send(tcp_ctrl.snd_una, FLAG_SYN | FLAG_ACK);
         return;
@@ -177,6 +187,26 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             tcp_ctrl.state = ESTABLISHED;
             tcp_ctrl.ev.connected();
         }
+    }
+
+    unsigned int plen = len - dataoff;
+    if (plen > 0) {
+        if (seq != tcp_ctrl.rcv_nxt) {
+            send(tcp_ctrl.snd_nxt, FLAG_ACK);
+            return;
+        }
+        tcp_ctrl.rcv_nxt += plen;
+        send(tcp_ctrl.snd_nxt, FLAG_ACK);
+        tcp_ctrl.ev.data(seg + dataoff, plen);
+    }
+
+    if ((h->flags & FLAG_FIN) && tcp_ctrl.state == ESTABLISHED) {
+        if (plen == 0 && seq != tcp_ctrl.rcv_nxt)
+            return;
+        tcp_ctrl.rcv_nxt += 1;
+        send(tcp_ctrl.snd_nxt, FLAG_ACK);
+        tcp_ctrl.state = CLOSE_WAIT;
+        tcp_ctrl.ev.data(NULL, 0);
     }
 }
 
