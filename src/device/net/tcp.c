@@ -5,14 +5,18 @@
 #include "tcp.h"
 #include "rng.h"
 #include "proc.h"
+#include "dev.h"
 
-#define LISTEN 0
-#define SYN_RCVD 1
-#define ESTABLISHED 2
-#define CLOSE_WAIT 3
-#define FIN_WAIT_1 4
-#define FIN_WAIT_2 5
-#define LAST_ACK 6
+enum tcp_state {
+    CLOSED,
+    LISTEN,
+    SYN_RCVD,
+    ESTABLISHED,
+    CLOSE_WAIT,
+    FIN_WAIT_1,
+    FIN_WAIT_2,
+    LAST_ACK,
+};
 
 #define FLAG_FIN 0x01
 #define FLAG_SYN 0x02
@@ -24,6 +28,7 @@
 #define OPT_MSS_LEN 4
 
 #define TCP_WINDOW (2 * TCP_MSS)
+#define RX_RING_SIZE 2048
 
 #define RTO_INITIAL 80000000u /* ~1 s */
 #define MAX_RETRIES 5
@@ -44,7 +49,7 @@ struct tcp_pseudo {
 } __attribute__((packed));
 
 static struct {
-    int state;
+    enum tcp_state state;
     unsigned short local_port;
     unsigned short remote_port;
     struct ipv4_addr remote_ip;
@@ -59,29 +64,24 @@ static struct {
     unsigned int rto_cycles;
     int sender;
     int send_err;
-    struct tcp_events ev;
+    unsigned int rx_head;
+    unsigned int rx_tail;
+    int rx_eof;
 } tcp_ctrl;
+
+static u8 rx_ring[RX_RING_SIZE];
 
 static int tcp_ctrl_mutex;
 
 // send_ipv4_raw prepends the ipv4 and snap headers in place
 static u8 tx_buf[sizeof(struct tcp_header) + OPT_MSS_LEN + TCP_MSS + 28] __attribute__((aligned(4)));
 
-void tcp_init(void) {
-    tcp_ctrl_mutex = mutex_create();
+static int connected(void) {
+    return tcp_ctrl.state == ESTABLISHED || tcp_ctrl.state == CLOSE_WAIT;
 }
 
-int tcp_listen(unsigned short port, const struct tcp_events *ev) {
-    mutex_lock(tcp_ctrl_mutex);
-    if (tcp_ctrl.local_port) {
-        mutex_unlock(tcp_ctrl_mutex);
-        return -1;
-    }
-    tcp_ctrl.local_port = port;
-    tcp_ctrl.ev = *ev;
-    tcp_ctrl.state = LISTEN;
-    mutex_unlock(tcp_ctrl_mutex);
-    return 0;
+static unsigned int rx_room(void) {
+    return RX_RING_SIZE - (tcp_ctrl.rx_head - tcp_ctrl.rx_tail);
 }
 
 static void send_segment(struct ipv4_addr dst, unsigned short src_port,
@@ -96,7 +96,8 @@ static void send_segment(struct ipv4_addr dst, unsigned short src_port,
     h->ack = htonl(ack);
     h->reserved = 0;
     h->flags = flags;
-    h->window = htons(TCP_WINDOW);
+    unsigned int room = rx_room();
+    h->window = htons(room < TCP_WINDOW ? room : TCP_WINDOW);
     h->checksum = 0;
     h->urgent = 0;
     if (flags & FLAG_SYN) {
@@ -150,16 +151,36 @@ static void send_new(u8 flags, const u8 *data, unsigned int len) {
 
 static void disconnect(void) {
     unsigned short port = tcp_ctrl.local_port;
-    struct tcp_events ev = tcp_ctrl.ev;
     int sender = tcp_ctrl.sender;
     memset(&tcp_ctrl, 0, sizeof(tcp_ctrl));
     tcp_ctrl.local_port = port;
-    tcp_ctrl.ev = ev;
-    tcp_ctrl.state = LISTEN;
-    if (sender) {
+    if (sender)
         tcp_ctrl.send_err = -1;
-        io_signal();
-    }
+    io_signal();
+}
+
+static void rx_put(const u8 *data, unsigned int len) {
+    unsigned int at = tcp_ctrl.rx_head & (RX_RING_SIZE - 1);
+    unsigned int first = RX_RING_SIZE - at;
+    if (first > len)
+        first = len;
+    memcpy(rx_ring + at, data, first);
+    memcpy(rx_ring, data + first, len - first);
+    tcp_ctrl.rx_head += len;
+}
+
+static unsigned int rx_get(u8 *out, unsigned int n) {
+    unsigned int avail = tcp_ctrl.rx_head - tcp_ctrl.rx_tail;
+    if (n > avail)
+        n = avail;
+    unsigned int at = tcp_ctrl.rx_tail & (RX_RING_SIZE - 1);
+    unsigned int first = RX_RING_SIZE - at;
+    if (first > n)
+        first = n;
+    memcpy(out, rx_ring + at, first);
+    memcpy(out + first, rx_ring, n - first);
+    tcp_ctrl.rx_tail += n;
+    return n;
 }
 
 static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
@@ -169,6 +190,9 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         return;
     unsigned int seq = ntohl(h->seq);
     unsigned int ack = ntohl(h->ack);
+
+    if (tcp_ctrl.state == CLOSED)
+        return;
 
     if (tcp_ctrl.state == LISTEN) {
         if (ntohs(h->dst_port) != tcp_ctrl.local_port)
@@ -197,10 +221,8 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
 
     if (h->flags & FLAG_RST) {
         if (SEQ_LEQ(tcp_ctrl.rcv_nxt, seq)
-            && SEQ_LT(seq, tcp_ctrl.rcv_nxt + TCP_WINDOW)) {
+            && SEQ_LT(seq, tcp_ctrl.rcv_nxt + TCP_WINDOW))
             disconnect();
-            tcp_ctrl.ev.closed(-1);
-        }
         return;
     }
 
@@ -220,12 +242,11 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             }
             if (tcp_ctrl.state == SYN_RCVD) {
                 tcp_ctrl.state = ESTABLISHED;
-                tcp_ctrl.ev.connected();
+                io_signal();
             } else if (tcp_ctrl.state == FIN_WAIT_1) {
                 tcp_ctrl.state = FIN_WAIT_2;
             } else if (tcp_ctrl.state == LAST_ACK) {
                 disconnect();
-                tcp_ctrl.ev.closed(0);
                 return;
             }
         }
@@ -233,13 +254,15 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
 
     unsigned int plen = len - dataoff;
     if (plen > 0) {
-        if (seq != tcp_ctrl.rcv_nxt) {
+        if (seq != tcp_ctrl.rcv_nxt || plen > rx_room()) {
             send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
             return;
         }
         tcp_ctrl.rcv_nxt += plen;
+        if (tcp_ctrl.state == ESTABLISHED) // after our fin nobody reads, so the data is acked but not buffered
+            rx_put(seg + dataoff, plen);
         send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
-        tcp_ctrl.ev.data(seg + dataoff, plen);
+        io_signal();
     }
 
     if (h->flags & FLAG_FIN) {
@@ -251,12 +274,12 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             tcp_ctrl.rcv_nxt += 1;
             send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
             tcp_ctrl.state = CLOSE_WAIT;
-            tcp_ctrl.ev.data(NULL, 0);
+            tcp_ctrl.rx_eof = 1;
+            io_signal();
         } else if (tcp_ctrl.state == FIN_WAIT_2) {
             tcp_ctrl.rcv_nxt += 1;
             send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
             disconnect();
-            tcp_ctrl.ev.closed(0);
         }
     }
 }
@@ -267,12 +290,9 @@ void tcp_recv(struct ipv4_addr src, unsigned char *seg, unsigned int len) {
     mutex_unlock(tcp_ctrl_mutex);
 }
 
-int tcp_send(const unsigned char *buf, unsigned int len) {
-    if (len == 0 || len > TCP_MSS)
-        return -1;
+static int send_data(const u8 *buf, unsigned int len) {
     mutex_lock(tcp_ctrl_mutex);
-    if ((tcp_ctrl.state != ESTABLISHED && tcp_ctrl.state != CLOSE_WAIT)
-        || tcp_ctrl.snd_una != tcp_ctrl.snd_nxt) {
+    if (!connected() || tcp_ctrl.snd_una != tcp_ctrl.snd_nxt) {
         mutex_unlock(tcp_ctrl_mutex);
         return -1;
     }
@@ -289,15 +309,114 @@ int tcp_send(const unsigned char *buf, unsigned int len) {
     return err;
 }
 
-void tcp_close(void) {
+static int tcp_conn_write(struct dev *d, const void *buf, unsigned int n) {
+    const u8 *p = buf;
+    unsigned int off = 0;
+    while (off < n) {
+        unsigned int chunk = n - off;
+        if (chunk > TCP_MSS)
+            chunk = TCP_MSS;
+        if (send_data(p + off, chunk) < 0)
+            return -1;
+        off += chunk;
+    }
+    return n;
+}
+
+static int tcp_conn_read(struct dev *d, void *buf, unsigned int n) {
     mutex_lock(tcp_ctrl_mutex);
-    if ((tcp_ctrl.state == ESTABLISHED || tcp_ctrl.state == CLOSE_WAIT)
-        && tcp_ctrl.snd_una == tcp_ctrl.snd_nxt) {
+    while (tcp_ctrl.rx_head == tcp_ctrl.rx_tail && !tcp_ctrl.rx_eof
+           && tcp_ctrl.state != CLOSED) {
+        mutex_unlock(tcp_ctrl_mutex);
+        io_wait();
+        mutex_lock(tcp_ctrl_mutex);
+    }
+    int got;
+    if (tcp_ctrl.rx_head != tcp_ctrl.rx_tail)
+        got = rx_get(buf, n);
+    else
+        got = tcp_ctrl.rx_eof ? 0 : -1;
+    mutex_unlock(tcp_ctrl_mutex);
+    return got;
+}
+
+static int tcp_conn_close(struct dev *d) {
+    mutex_lock(tcp_ctrl_mutex);
+    tcp_ctrl.rx_tail = tcp_ctrl.rx_head;
+    if (connected() && tcp_ctrl.snd_una == tcp_ctrl.snd_nxt) {
         tcp_ctrl.state = tcp_ctrl.state == ESTABLISHED ? FIN_WAIT_1 : LAST_ACK;
         tcp_ctrl.snd_nxt += 1;
         send_new(FLAG_FIN | FLAG_ACK, NULL, 0);
     }
+    while (tcp_ctrl.state != CLOSED) {
+        mutex_unlock(tcp_ctrl_mutex);
+        io_wait();
+        mutex_lock(tcp_ctrl_mutex);
+    }
     mutex_unlock(tcp_ctrl_mutex);
+    return 0;
+}
+
+static int tcp_conn_open(struct dev *d, int arg) {
+    return -1;
+}
+
+static const struct dev_ops tcp_conn_ops = {
+    .open = tcp_conn_open,
+    .close = tcp_conn_close,
+    .read = tcp_conn_read,
+    .write = tcp_conn_write,
+};
+
+static int tcp_control(struct dev *d, int op, int arg) {
+    int rc = -1;
+    mutex_lock(tcp_ctrl_mutex);
+    switch (op) {
+        case TCP_LISTEN:
+            if (!tcp_ctrl.local_port) {
+                tcp_ctrl.local_port = arg;
+                rc = 0;
+            }
+            break;
+        case TCP_ACCEPT:
+            if (!tcp_ctrl.local_port)
+                break;
+            // the peer may have sent its fin before we run, so close_wait also counts as accepted
+            while (!connected()) {
+                if (tcp_ctrl.state == CLOSED)
+                    tcp_ctrl.state = LISTEN;
+                mutex_unlock(tcp_ctrl_mutex);
+                io_wait();
+                mutex_lock(tcp_ctrl_mutex);
+            }
+            rc = dev_alloc("tcpconn");
+            break;
+    }
+    mutex_unlock(tcp_ctrl_mutex);
+    return rc;
+}
+
+static int tcp_close(struct dev *d) {
+    int rc = -1;
+    mutex_lock(tcp_ctrl_mutex);
+    if (tcp_ctrl.state == CLOSED || tcp_ctrl.state == LISTEN) {
+        tcp_ctrl.state = CLOSED;
+        tcp_ctrl.local_port = 0;
+        rc = 0;
+    }
+    mutex_unlock(tcp_ctrl_mutex);
+    return rc;
+}
+
+static const struct dev_ops tcp_ops = {
+    .close = tcp_close,
+    .control = tcp_control,
+};
+
+void tcp_init(void) {
+    tcp_ctrl_mutex = mutex_create();
+    dev_register("tcp", &tcp_ops, NULL);
+    dev_register("tcpconn", &tcp_conn_ops, NULL);
 }
 
 static void tcp_tick(void) {
@@ -306,7 +425,6 @@ static void tcp_tick(void) {
         && ccount() - tcp_ctrl.last_send >= tcp_ctrl.rto_cycles) {
         if (tcp_ctrl.retries >= MAX_RETRIES) {
             disconnect();
-            tcp_ctrl.ev.closed(-1);
         } else {
             tcp_ctrl.retries += 1;
             tcp_ctrl.rto_cycles <<= 1;

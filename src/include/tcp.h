@@ -5,6 +5,13 @@
 
 #define TCP_MSS 536
 
+/* control ops on the "tcp" listener. The accepted "tcpconn": read returns 0
+   at the peer's FIN and -1 once the connection is gone; write blocks until
+   acked, -1 if the connection dies; close sends our FIN and blocks until the
+   connection is fully down. */
+#define TCP_LISTEN 1 /* arg = local port */
+#define TCP_ACCEPT 2 /* blocks until a connection is established; returns its descriptor */
+
 struct tcp_header {
     unsigned short src_port;
     unsigned short dst_port;
@@ -17,23 +24,6 @@ struct tcp_header {
     unsigned short checksum;
     unsigned short urgent;
 } __attribute__((packed));
-
-/* Callbacks run in the IPv4 handler process under the TCP lock and must not
-   block. data(NULL, 0) = peer EOF; closed err < 0 = RST or retransmit give-up. */
-struct tcp_events {
-    void (*connected)(void);
-    void (*data)(const unsigned char *buf, unsigned int len);
-    void (*closed)(int err);
-};
-
-int tcp_listen(unsigned short port, const struct tcp_events *ev);
-
-/* Blocks until the segment is acked; buf must stay valid meanwhile. -1 if
-   there is no connection, len is 0 or over TCP_MSS, or the connection dies. */
-int tcp_send(const unsigned char *buf, unsigned int len);
-
-/* Sends our FIN and returns; closed(0) fires once the exchange completes. */
-void tcp_close(void);
 
 void tcp_recv(struct ipv4_addr src, unsigned char *seg, unsigned int len);
 

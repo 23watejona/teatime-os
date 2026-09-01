@@ -7,6 +7,7 @@
 #include "wdt.h"
 #include "net.h"
 #include "tcp.h"
+#include "udp.h"
 
 #define NULL_STK 1024
 #define INIT_STK 2048
@@ -111,8 +112,10 @@ IRAM_ATTR void start ( void )
     avail_list = new_queue();
     sem_init();
     io_wait_init();
+    dev_init();
     net_init();
     ipv4_init();
+    udp_init();
     tcp_init();
     make_avail(NULL_PROC);
 
@@ -182,7 +185,7 @@ IRAM_ATTR void start ( void )
     make_avail(tcp_timer_pid);
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
-    dev_init();
+    uart_init();
     init_cpu_timer();
     while (1) {
         asm("waiti 0");

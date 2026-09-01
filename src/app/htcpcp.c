@@ -1,6 +1,6 @@
 #include "string.h"
-#include "proc.h"
 #include "uart.h"
+#include "dev.h"
 #include "tcp.h"
 #include "pot.h"
 
@@ -9,17 +9,11 @@
 #define RESP_MAX 1024
 #define BODY_MAX 256
 
-#define REQ_OPEN 0
-#define REQ_COMPLETE 1
-#define REQ_TRUNCATED 2
-
 #define CRLF "\r\n"
 
 static unsigned char req[REQ_MAX];
 static unsigned int req_len;
 static unsigned int req_body;
-static volatile int req_state;
-static int req_sem;
 
 static char resp[RESP_MAX];
 static unsigned int resp_len;
@@ -283,62 +277,43 @@ static void handle(void) {
     brew(tea);
 }
 
-static void connected(void) {
-}
-
-static void data(const unsigned char *buf, unsigned int len) {
-    if (req_state != REQ_OPEN)
-        return;
-    if (!buf || len > REQ_MAX - req_len) {
-        req_state = REQ_TRUNCATED;
-        sem_signal(req_sem);
-        return;
-    }
-    memcpy(req + req_len, buf, len);
-    req_len += len;
+static int request_complete(void) {
     int end = find(req, req_len, CRLF CRLF);
     if (end < 0)
-        return;
+        return 0;
     req_body = end + 4;
     const unsigned char *v;
     unsigned int vn;
     unsigned int content_len = header("Content-Length", &v, &vn) ? parse_uint(v, vn) : 0;
-    if (req_len - req_body >= content_len) {
-        req_state = REQ_COMPLETE;
-        sem_signal(req_sem);
-    }
+    return req_len - req_body >= content_len;
 }
-
-static void closed(int err) {
-    req_len = 0;
-    req_state = REQ_OPEN;
-}
-
-static const struct tcp_events ev = {
-    .connected = connected,
-    .data = data,
-    .closed = closed,
-};
 
 void htcpcp_proc(void) {
-    req_sem = sem_create(0);
-    if (tcp_listen(HTCPCP_PORT, &ev) < 0)
+    int listener = open("tcp", 0);
+    if (listener < 0 || control(listener, TCP_LISTEN, HTCPCP_PORT) < 0) {
         kprintf_uart("htcpcp: listen failed\n");
+        return;
+    }
     while (1) {
-        sem_wait(req_sem);
-        if (req_state == REQ_OPEN)
+        int conn = control(listener, TCP_ACCEPT, 0);
+        if (conn < 0)
             continue;
-        if (req_state == REQ_COMPLETE)
+        req_len = 0;
+        int n = 1;
+        while (n > 0 && req_len < REQ_MAX && !request_complete()) {
+            n = read(conn, req + req_len, REQ_MAX - req_len);
+            if (n > 0)
+                req_len += n;
+        }
+        if (n < 0) {
+            close(conn);
+            continue;
+        }
+        if (request_complete())
             handle();
         else
             reply("400 Bad Request", "incomplete request");
-        for (unsigned int off = 0; off < resp_len; off += TCP_MSS) {
-            unsigned int n = resp_len - off;
-            if (n > TCP_MSS)
-                n = TCP_MSS;
-            if (tcp_send((unsigned char *) resp + off, n) < 0)
-                break;
-        }
-        tcp_close();
+        write(conn, resp, resp_len);
+        close(conn);
     }
 }

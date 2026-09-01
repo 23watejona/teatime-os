@@ -2,26 +2,38 @@
 #include "dev.h"
 #include "string.h"
 #include "proc.h"
-#include "uart.h"
 
-static struct dev devtab[] = {
-    { "uart0", &uart_ops, NULL },
-};
+#define NDEV 8
 
-#define NDEV (sizeof(devtab) / sizeof(devtab[0]))
+static struct dev devtab[NDEV];
 
 static int devtab_mutex;
 
 void dev_init(void) {
     devtab_mutex = mutex_create();
-    uart_init();
+}
+
+int dev_register(const char *name, const struct dev_ops *ops, void *state) {
+    int fd = -1;
+    mutex_lock(devtab_mutex);
+    for (int i = 0; i < NDEV; i++) {
+        if (!devtab[i].name) {
+            devtab[i].name = name;
+            devtab[i].ops = ops;
+            devtab[i].state = state;
+            fd = i;
+            break;
+        }
+    }
+    mutex_unlock(devtab_mutex);
+    return fd;
 }
 
 int dev_alloc(const char *name) {
     int fd = -1;
     mutex_lock(devtab_mutex);
-    for (unsigned int i = 0; i < NDEV; i++) {
-        if (!devtab[i].used && strcmp(devtab[i].name, name) == 0) {
+    for (int i = 0; i < NDEV; i++) {
+        if (devtab[i].name && !devtab[i].used && strcmp(devtab[i].name, name) == 0) {
             devtab[i].used = 1;
             fd = i;
             break;
@@ -38,7 +50,7 @@ static void release(int fd) {
 }
 
 static struct dev *lookup(int fd) {
-    if (fd < 0 || fd >= (int)NDEV || !devtab[fd].used)
+    if (fd < 0 || fd >= NDEV || !devtab[fd].used)
         return NULL;
     return &devtab[fd];
 }

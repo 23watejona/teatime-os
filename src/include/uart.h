@@ -7,8 +7,6 @@
 void kprintf_uart(char *f, ...);
 void kputc_uart(int c);
 
-struct dev_ops;
-extern const struct dev_ops uart_ops;
 void uart_init(void);
 
 struct uart_ctrl {

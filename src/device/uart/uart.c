@@ -1,4 +1,5 @@
 #include "stdarg.h"
+#include "def.h"
 #include "uart.h"
 #include "dev.h"
 #include "proc.h"
@@ -144,7 +145,7 @@ static int uart_write(struct dev *d, const void *buf, unsigned int n) {
     return n;
 }
 
-const struct dev_ops uart_ops = {
+static const struct dev_ops uart_ops = {
     .read = uart_read,
     .write = uart_write,
 };
@@ -169,4 +170,5 @@ void uart_init(void) {
     uart0.int_enable.rxfifo_full = 1;
     uart0.int_enable.rxfifo_timeout = 1;
     intr_unmask(1u << INUM_UART);
+    dev_register("uart0", &uart_ops, NULL);
 }

@@ -28,6 +28,9 @@ int read(int fd, void *buf, unsigned int n);
 int write(int fd, const void *buf, unsigned int n);
 int control(int fd, int op, int arg);
 
+/* Drivers only, at startup: adds a row; several rows may share a name,
+   one per descriptor the driver can hand out. -1 when the table is full. */
+int dev_register(const char *name, const struct dev_ops *ops, void *state);
 /* Drivers only: claims a free row of that name (an accepted connection),
    bypassing the row's open op. */
 int dev_alloc(const char *name);
