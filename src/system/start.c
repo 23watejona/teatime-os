@@ -35,7 +35,7 @@ void wifi_rx_init(void);
 void wifi_rx_servicer(void);
 void main(void);
 void dev_init(void);
-int disable();
+void gpio_init(void);
 
 extern int wifi_rx_servicer_pid;
 
@@ -187,6 +187,7 @@ IRAM_ATTR void start ( void )
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
     uart_init();
+    gpio_init();
     init_cpu_timer();
     while (1) {
         asm("waiti 0");

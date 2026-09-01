@@ -3,7 +3,7 @@
 #include "string.h"
 #include "proc.h"
 
-#define NDEV 8
+#define NDEV 16
 
 static struct dev devtab[NDEV];
 
