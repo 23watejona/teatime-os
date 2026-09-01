@@ -6,6 +6,7 @@
 #include "wait.h"
 #include "wdt.h"
 #include "net.h"
+#include "tcp.h"
 
 #define NULL_STK 1024
 #define INIT_STK 2048
@@ -111,6 +112,7 @@ IRAM_ATTR void start ( void )
     io_wait_init();
     net_init();
     ipv4_init();
+    tcp_init();
     make_avail(NULL_PROC);
 
     
@@ -174,6 +176,9 @@ IRAM_ATTR void start ( void )
 
     int ipv4_pid = create(ipv4_proc, SERVICER_STK, 8);
     make_avail(ipv4_pid);
+
+    int tcp_timer_pid = create(tcp_timer_proc, SERVICER_STK, 5); /* a resend runs the whole transmit path, wifi_ccmp_tx's 1600-byte frame included */
+    make_avail(tcp_timer_pid);
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
     init_cpu_timer();

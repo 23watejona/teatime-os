@@ -2,6 +2,7 @@
 #define IPV4_H
 
 #define IPPROTO_ICMP 1
+#define IPPROTO_TCP  6
 #define IPPROTO_UDP  17
 
 struct ipv4_addr {

@@ -3,6 +3,7 @@
 #include "net.h"
 #include "ipv4.h"
 #include "udp.h"
+#include "tcp.h"
 #include "icmp.h"
 #include "proc.h"
 
@@ -65,6 +66,10 @@ static void ipv4_recv(u8 *buf, unsigned int len, const u8 *sa) {
         case IPPROTO_ICMP:
             if (to_us)
                 icmp_recv(buf, ihl, len, sa);
+            break;
+        case IPPROTO_TCP:
+            if (to_us && payload_len >= sizeof(struct tcp_header))
+                tcp_recv(src, payload, payload_len);
             break;
         case IPPROTO_UDP:
             if (to_us && payload_len >= sizeof(union udp_header))

@@ -3,6 +3,7 @@
 
 void dns_test_proc(void);
 void ping_test_proc(void);
+void echo_app_proc(void);
 
 #define APP_PERIOD_CYCLES 240000000u /* ~3 s at 80 MHz */
 
@@ -37,6 +38,10 @@ void main(void)
     int ping_test_pid = create(ping_test_proc, 4096, 5);
     if (ping_test_pid >= 0)
         make_avail(ping_test_pid);
+
+    int echo_app_pid = create(echo_app_proc, 2048, 5);
+    if (echo_app_pid >= 0)
+        make_avail(echo_app_pid);
     while (1)
         asm("waiti 0");
 }
