@@ -289,6 +289,7 @@ static int request_complete(void) {
 }
 
 void htcpcp_proc(void) {
+    pot_init();
     int listener = open("tcp", 0);
     if (listener < 0 || control(listener, TCP_LISTEN, HTCPCP_PORT) < 0) {
         kprintf_uart("htcpcp: listen failed\n");

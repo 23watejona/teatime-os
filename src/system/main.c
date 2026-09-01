@@ -5,6 +5,7 @@ void dns_test_proc(void);
 void ping_test_proc(void);
 void htcpcp_proc(void);
 void console_test_proc(void);
+void gpio_test_proc(void);
 
 void main(void)
 {
@@ -23,6 +24,10 @@ void main(void)
     int console_test_pid = create(console_test_proc, 4096, 5);
     if (console_test_pid >= 0)
         make_avail(console_test_pid);
+
+    int gpio_test_pid = create(gpio_test_proc, 4096, 5);
+    if (gpio_test_pid >= 0)
+        make_avail(gpio_test_pid);
     while (1)
         asm("waiti 0");
 }
