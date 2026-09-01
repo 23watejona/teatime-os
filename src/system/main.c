@@ -1,5 +1,7 @@
-#include "uart.h"
 #include "proc.h"
+
+#define APP_STK 4096
+#define APP_PRIO 5
 
 void dns_test_proc(void);
 void ping_test_proc(void);
@@ -9,25 +11,11 @@ void gpio_test_proc(void);
 
 void main(void)
 {
-    int dns_test_pid = create(dns_test_proc, 4096, 5);
-    if (dns_test_pid >= 0)
-        make_avail(dns_test_pid);
-
-    int ping_test_pid = create(ping_test_proc, 4096, 5);
-    if (ping_test_pid >= 0)
-        make_avail(ping_test_pid);
-
-    int htcpcp_pid = create(htcpcp_proc, 4096, 5);
-    if (htcpcp_pid >= 0)
-        make_avail(htcpcp_pid);
-
-    int console_test_pid = create(console_test_proc, 4096, 5);
-    if (console_test_pid >= 0)
-        make_avail(console_test_pid);
-
-    int gpio_test_pid = create(gpio_test_proc, 4096, 5);
-    if (gpio_test_pid >= 0)
-        make_avail(gpio_test_pid);
+    spawn(htcpcp_proc, APP_STK, APP_PRIO);
+    spawn(dns_test_proc, APP_STK, APP_PRIO);
+    spawn(ping_test_proc, APP_STK, APP_PRIO);
+    spawn(console_test_proc, APP_STK, APP_PRIO);
+    spawn(gpio_test_proc, APP_STK, APP_PRIO);
     while (1)
         asm("waiti 0");
 }

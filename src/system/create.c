@@ -2,13 +2,12 @@
 #include "proc.h"
 #include "intr.h"
 
-extern int initmem(void);
-extern char *alloc_stack(unsigned int);
+#include "mem.h"
+
 extern void start_proc(void (*)(void));
 extern int get_pid(void);
 
 
-// since this is a stack frame we go in reverse order
 #define NUM_AREG (16)
 struct ctxsw_stack_frame {
     unsigned int epc1;
@@ -49,14 +48,10 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
         return -1;
     }
 
-    // move the pointer to the top of the stack
     unsigned int *stack_addr = ((unsigned int *)stk) + (stack_size >> 2);
-    
-    // allocate space for stack frame
     stack_addr = (unsigned int *)((char *)(stack_addr) - sizeof(struct ctxsw_stack_frame));
     struct ctxsw_stack_frame *frame = (struct ctxsw_stack_frame *)stack_addr;
     
-    // zero out aregs in frame
     for (int i = 0; i < NUM_AREG; ++i) {
         frame->address_regs.raw_areg_mem[i] = 0;
     }
@@ -75,5 +70,12 @@ int create(void *funcaddr, unsigned int stack_size, int priority) {
     *proctab[pid].stk_base = STK_CANARY(pid);
     proctab[pid].priority = priority;
     
+    return pid;
+}
+
+int spawn(void *func, unsigned int stack_size, int priority) {
+    int pid = create(func, stack_size, priority);
+    if (pid >= 0)
+        make_avail(pid);
     return pid;
 }

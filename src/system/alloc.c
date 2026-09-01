@@ -1,7 +1,8 @@
 #include "uart.h"
 #include "mem.h"
+#include "proc.h"
 
-char *alloc(unsigned int size) {
+static char *first_fit(unsigned int size) {
 	size = ceil_memblk(size + ALLOC_MEMBLK_SIZE);
 	if (size < MIN_ALLOC) {
 		size = MIN_ALLOC;
@@ -42,7 +43,7 @@ char *alloc(unsigned int size) {
 }
 
 
-char *alloc_stack(unsigned int size) {
+static char *last_fit(unsigned int size) {
 	size = ceil_memblk(size + ALLOC_MEMBLK_SIZE);
 	if (size < MIN_ALLOC) {
 		size = MIN_ALLOC;
@@ -91,4 +92,47 @@ char *alloc_stack(unsigned int size) {
 	}
 
 	return ret->data;
+}
+
+static void insert_free(memblk_t *blk) {
+	memblk_t *prev = NULL;
+	memblk_t *itr = freelist;
+	while (itr && itr < blk) {
+		prev = itr;
+		itr = itr->next;
+	}
+	if (itr && (char *)blk + blk->size == (char *)itr) {
+		blk->size += itr->size;
+		blk->next = itr->next;
+	} else {
+		blk->next = itr;
+	}
+	if (prev && (char *)prev + prev->size == (char *)blk) {
+		prev->size += blk->size;
+		prev->next = blk->next;
+	} else if (prev) {
+		prev->next = blk;
+	} else {
+		freelist = blk;
+	}
+}
+
+char *alloc(unsigned int size) {
+	int m = disable();
+	char *p = first_fit(size);
+	enable(m);
+	return p;
+}
+
+char *alloc_stack(unsigned int size) {
+	int m = disable();
+	char *p = last_fit(size);
+	enable(m);
+	return p;
+}
+
+void free(void *p) {
+	int m = disable();
+	insert_free((memblk_t *)((char *)p - ALLOC_MEMBLK_SIZE));
+	enable(m);
 }

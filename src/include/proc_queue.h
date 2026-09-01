@@ -10,10 +10,10 @@
 
 
 typedef struct queue_entry {
-    int key; // ordering of queue
+    int key;
     int pid;
-    struct queue_entry *prev; // prev element id in queue table
-    struct queue_entry *next; // next element id in queue table
+    struct queue_entry *prev;
+    struct queue_entry *next;
 } queue_entry;
 
 extern queue_entry process_queues[NUM_QENT];

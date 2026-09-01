@@ -1,6 +1,7 @@
 #include "uart.h"
 
 #include "reg_util.h"
+#include "rf_i2c.h"
 
 #define CLK_52MHZ (52u)
 #define CLK_80MHZ (80u)
@@ -13,13 +14,12 @@ void set_uart0_div(unsigned int clk_rate_mhz, unsigned int baud_rate) {
     uart0.conf0.x &= ~UART_FIFO_RESET;
 }
 
-void set_magic_clk_reg (unsigned int val1, unsigned int val2) {
-    WRITE_REG(0x60000d10, 103u | 1u << 8 | val1 << 0x10 | 0x1000000);
-    for (unsigned int t = 0; (READ_REG(0x60000d00 + 16) & 0x2000000) && t < 100000u; t++)
-        ;
-    WRITE_REG(0x60000d10, 103u | 2u << 8 | val2 << 0x10 | 0x1000000);
-    for (unsigned int t = 0; (READ_REG(0x60000d00 + 16) & 0x2000000) && t < 100000u; t++)
-        ;
+#define I2C_BBPLL 103
+#define I2C_BBPLL_HOST 4
+
+static void set_bbpll(unsigned int reg_one, unsigned int reg_two) {
+    rf_i2c_write(I2C_BBPLL, I2C_BBPLL_HOST, 1, reg_one);
+    rf_i2c_write(I2C_BBPLL, I2C_BBPLL_HOST, 2, reg_two);
 }
 
 int init_cpu_clk(unsigned int clk_rate) {
@@ -35,9 +35,9 @@ int init_cpu_clk(unsigned int clk_rate) {
     }
 
     if (clk_rate == CLK_160MHZ) {
-        set_magic_clk_reg(0xc8, 0x91);
+        set_bbpll(0xc8, 0x91);
     } else {
-        set_magic_clk_reg(0x88, 0x91);
+        set_bbpll(0x88, 0x91);
     }
 
     return 0;

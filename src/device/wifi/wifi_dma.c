@@ -2,7 +2,7 @@
 #include "wifi_dma.h"
 #include "uart.h"
 
-extern char *alloc(unsigned int);
+#include "mem.h"
 
 // the rx mac bounds-checks every dma address against two windows and walks the descriptor chain from the base of the first, so descriptors and packet data must come from one contiguous allocation:
 //   window 1: [ desc[RX_BUF_NUM] ][ data: RX_BUF_NUM * RX_BUF_LEN ]

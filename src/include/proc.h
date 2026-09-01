@@ -1,13 +1,13 @@
 #ifndef PROC_H
 #define PROC_H
 
-#define PROC_UNUSED 0 // this proc is unused
-#define PROC_UNAVAIL 1 // this proc is used, but cannot be scheduled
-#define PROC_AVAIL 2 // this proc can be scheduled
-#define PROC_CURR 3 // this proc is currently running
-#define PROC_COND_WAIT 4 // this proc is blocked on a condition
-#define PROC_SEM_WAIT 5 // this proc is blocked on a semaphore
-#define PROC_TIMED_WAIT 6 // this proc is on the sleep list, with or without a condition
+#define PROC_UNUSED 0
+#define PROC_UNAVAIL 1 /* created, not yet made available */
+#define PROC_AVAIL 2
+#define PROC_CURR 3
+#define PROC_COND_WAIT 4
+#define PROC_SEM_WAIT 5
+#define PROC_TIMED_WAIT 6 /* on the sleep list, with or without a cond */
 
 #define NUM_PROC 10
 #define NULL_PROC 0
@@ -36,6 +36,9 @@ void enable(int mask);
 void sched(void);
 
 extern int create(void *func, unsigned int stack_size, int priority);
+/* create and make available; the pid, or -1 */
+int spawn(void *func, unsigned int stack_size, int priority);
+void ctxsw(unsigned int **old_sp, unsigned int **new_sp);
 
 extern void make_avail(int pid);
 

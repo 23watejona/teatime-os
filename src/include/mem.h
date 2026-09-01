@@ -21,4 +21,9 @@ typedef struct memblk_t {
 #define UNALLOC_MEMBLK_SIZE (sizeof(memblk_t))
 
 extern memblk_t *freelist;
+
+int initmem(void);
+char *alloc(unsigned int size);
+char *alloc_stack(unsigned int size);
+void free(void *p);
 #endif

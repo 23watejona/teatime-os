@@ -1,6 +1,9 @@
 #ifndef TIMER_H
 #define TIMER_H
 
+int init_cpu_clk(unsigned int clk_rate_mhz);
+void init_cpu_timer(void);
+
 static inline unsigned int ccount(void) {
     unsigned int c;
     asm volatile("rsr.ccount %0" : "=r"(c));

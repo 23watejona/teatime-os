@@ -8,38 +8,19 @@
 #include "net.h"
 #include "tcp.h"
 #include "udp.h"
+#include "mem.h"
+#include "timer.h"
+#include "intr.h"
+#include "wifi.h"
+#include "dev.h"
+#include "gpio.h"
 
 #define NULL_STK 1024
 #define INIT_STK 2048
 #define SERVICER_STK 4096 // wpa hmac peak plus a tick's frames measured ~2112
 
 
-void ctxsw(unsigned int **, unsigned int **);
-int initmem(void);
-char *alloc_stack(unsigned int);
-void _set_vec_base(void);
-int init_cpu_clk(unsigned int clk_rate_mhz);
-void init_cpu_timer(void);
-void init_wifi_clk(void);
-void init_wifi_pbus(void);
-void init_wifi_iomux(void);
-void init_wifi_bb(void);
-void init_wifi_dma(void);
-void init_wifi_mac(void);
-void wifi_mac_rx_enable(void);
-void init_wifi_mac_addr(void);
-void init_wifi_rf(void);
-void wifi_secrets_init(void);
-void wifi_set_channel(int);
-void wifi_rx_init(void);
-void wifi_rx_servicer(void);
 void main(void);
-void dev_init(void);
-void gpio_init(void);
-
-extern int wifi_rx_servicer_pid;
-
-unsigned int intr_unmask(unsigned int);
 
 extern queue_entry *avail_list;
 extern unsigned int _bss_start, _bss_end;
@@ -53,8 +34,7 @@ unsigned int boot_reset_cause;
 #define CACHE_CTRL2 0x3ff00024
 #define SPI0_CTRL   0x60000208
 
-/* Map the first MB of flash at 0x40200000. Runs with the cache off, so it and
-   everything it touches must live in IRAM. */
+// runs with the cache off, so it and everything it touches must live in iram
 IRAM_ATTR static void flash_cache_enable(void)
 {
     while (READ_REG(CACHE_CTRL) & 0x100)
@@ -172,18 +152,10 @@ IRAM_ATTR void start ( void )
     kprintf_uart("wifi: done\n");
     wdt_feed();
 
-    int pid = create(main, INIT_STK, 5);
-    kprintf_uart("created main as pid %d\n", pid);
-    make_avail(pid);
-
-    wifi_rx_servicer_pid = create(wifi_rx_servicer, SERVICER_STK, 10);
-    make_avail(wifi_rx_servicer_pid);
-
-    int ipv4_pid = create(ipv4_proc, SERVICER_STK, 8);
-    make_avail(ipv4_pid);
-
-    int tcp_timer_pid = create(tcp_timer_proc, SERVICER_STK, 5); /* a resend runs the whole transmit path, wifi_ccmp_tx's 1600-byte frame included */
-    make_avail(tcp_timer_pid);
+    spawn(main, INIT_STK, 5);
+    wifi_rx_servicer_pid = spawn(wifi_rx_servicer, SERVICER_STK, 10);
+    spawn(ipv4_proc, SERVICER_STK, 8);
+    spawn(tcp_timer_proc, SERVICER_STK, 5); // a resend runs the whole transmit path, wifi_ccmp_tx's 1600-byte frame included
 
     // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
     uart_init();

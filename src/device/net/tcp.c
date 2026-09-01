@@ -33,6 +33,7 @@ enum tcp_state {
 
 #define RTO_INITIAL 80000000u /* ~1 s */
 #define RTO_POLL (TICKS_PER_SEC / 10)
+#define CLOSE_TICKS (10 * TICKS_PER_SEC) /* a peer that never answers our FIN */
 #define MAX_RETRIES 5
 
 #define SEQ_LT(a, b) ((int)((a) - (b)) < 0)
@@ -353,7 +354,8 @@ static int tcp_conn_close(struct dev *d) {
         send_new(FLAG_FIN | FLAG_ACK, NULL, 0);
     }
     while (tcp_ctrl.state != CLOSED) {
-        cond_wait(tcp_ctrl.dev->cond, tcp_ctrl_mutex);
+        if (cond_timedwait(tcp_ctrl.dev->cond, tcp_ctrl_mutex, CLOSE_TICKS) < 0)
+            disconnect();
     }
     mutex_unlock(tcp_ctrl_mutex);
     return 0;
