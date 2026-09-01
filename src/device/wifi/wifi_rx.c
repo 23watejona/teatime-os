@@ -13,7 +13,7 @@
 /* Channel dwell: ~400 ms at 80 MHz, a few beacon intervals. */
 #define CHAN_DWELL_CYCLES   32000000u
 
-#define STAGE_SLOTS 8
+#define STAGE_SLOTS 4
 
 extern void wifi_set_channel(unsigned int ch);
 extern void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen);

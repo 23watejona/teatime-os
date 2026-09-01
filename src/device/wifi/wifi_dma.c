@@ -21,8 +21,7 @@ void init_wifi_dma(void) {
     unsigned int total = desc_bytes
                        + RX_BUF_NUM * RX_BUF_LEN
                        + sizeof(struct lldesc) + 4
-                       + 4
-                       + RX_MAX_PKT;
+                       + 4;
 
     unsigned char *region = (unsigned char *) alloc(total);
     if (!region) {

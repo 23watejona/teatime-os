@@ -1,9 +1,8 @@
 #ifndef WIFI_DMA_H
 #define WIFI_DMA_H
 
-#define RX_BUF_NUM 16
-#define RX_BUF_LEN 524
-#define RX_MAX_PKT 1600
+#define RX_BUF_NUM 8
+#define RX_BUF_LEN 1600
 
 struct lldesc {
     unsigned int size   : 12;
