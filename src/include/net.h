@@ -3,14 +3,19 @@
 
 #include "ipv4.h"
 
-/* Advances the minimal IP bring-up (ARP the gateway, then ICMP-ping it) once the
-   4-way handshake has installed keys. Called once per RX-poll iteration. */
+void net_init(void);
+
 void net_tick(void);
 
-/* Delivers a decrypted LLC/SNAP payload (ARP or IP) to the stack. Servicer
-   context. */
 void net_recv(unsigned char *llc, unsigned int len);
 
-int net_send_to_gateway(unsigned char *data, unsigned int len);
+/* Resolves the next hop over ARP; may park the caller. L3 process context
+   only. pkt needs 8 bytes of headroom. */
+int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len);
+
+/* To a known link address, no resolution. pkt needs 8 bytes of headroom. */
+int net_tx(const unsigned char *mac, unsigned char *pkt, unsigned int len);
+
+int net_tx_llc(const unsigned char *mac, unsigned char *llc, unsigned int len);
 
 #endif

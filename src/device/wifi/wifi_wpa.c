@@ -5,6 +5,7 @@
 #include "wifi_tx.h"
 #include "wifi_wpa.h"
 #include "wifi_ccmp.h"
+#include "net.h"
 #include "ap_secrets.h"
 #include "rng.h"
 
@@ -131,7 +132,7 @@ static void send_eapol(unsigned int keyinfo, const u8 *nonce,
     n += 99 + kdlen;
     // before WPA_DONE no key is installed so the 4-way goes out in the clear, but a group-rekey reply must ride the encrypted link like any other data
     if (wpa_state == WPA_DONE)
-        wifi_ccmp_tx(ap_bssid, f + 24, n - 24);
+        net_tx_llc(ap_bssid, f + 24, n - 24);
     else
         wifi_tx_frame(f, n);
 }

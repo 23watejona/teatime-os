@@ -4,11 +4,10 @@
 #include "uart.h"
 queue_entry *avail_list;
 
-void create_intr_frame();
-void restore_intr_frame();
 
-void make_avail(int pid) {
+IRAM_ATTR void make_avail(int pid) {
+    int m = disable();
     proctab[pid].status = PROC_AVAIL;
     proc_enqueue(avail_list, pid, proctab[pid].priority);
-    return;
+    enable(m);
 }

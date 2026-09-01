@@ -109,6 +109,7 @@ IRAM_ATTR void start ( void )
     avail_list = new_queue();
     sem_init();
     io_wait_init();
+    net_init();
     ipv4_init();
     make_avail(NULL_PROC);
 

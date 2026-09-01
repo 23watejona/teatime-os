@@ -35,7 +35,6 @@ void sched(void);
 
 extern int create(void *func, unsigned int stack_size, int priority);
 
-/* must be called with interrupts off */
 extern void make_avail(int pid);
 
 void io_wait_init(void);

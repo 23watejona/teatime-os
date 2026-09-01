@@ -2,9 +2,7 @@
 #include "proc.h"
 
 void dns_test_proc(void);
-
-extern int disable(void);
-extern void enable(int mask);
+void ping_test_proc(void);
 
 #define APP_PERIOD_CYCLES 240000000u /* ~3 s at 80 MHz */
 
@@ -29,18 +27,16 @@ void main(void)
 {
     int pid = create(app_proc, 2048, 5);
     kprintf_uart("main: created app as pid %d\n", pid);
-    if (pid >= 0) {
-        int m = disable();
+    if (pid >= 0)
         make_avail(pid);
-        enable(m);
-    }
 
-    int dns_test_pid = create(dns_test_proc, 2048, 5);
-    if (dns_test_pid >= 0) {
-        int m = disable();
+    int dns_test_pid = create(dns_test_proc, 4096, 5);
+    if (dns_test_pid >= 0)
         make_avail(dns_test_pid);
-        enable(m);
-    }
+
+    int ping_test_pid = create(ping_test_proc, 4096, 5);
+    if (ping_test_pid >= 0)
+        make_avail(ping_test_pid);
     while (1)
         asm("waiti 0");
 }

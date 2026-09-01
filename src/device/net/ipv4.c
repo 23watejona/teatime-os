@@ -112,5 +112,5 @@ int send_ipv4_raw(struct ipv4_addr src, struct ipv4_addr dst, unsigned char prot
 
     memmove(payload + sizeof(h), payload, payload_len);
     memcpy(payload, h.raw, sizeof(h));
-    return net_send_to_gateway(payload, sizeof(h) + payload_len);
+    return net_send(dst, payload, sizeof(h) + payload_len);
 }
