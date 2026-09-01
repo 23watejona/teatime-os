@@ -106,6 +106,7 @@ IRAM_ATTR void start ( void )
     null_proc_entry->priority = PROC_NULL_PRIO;
     curr_pid = 0;
     avail_list = new_queue();
+    sem_init();
     make_avail(NULL_PROC);
 
     

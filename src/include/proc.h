@@ -6,6 +6,7 @@
 #define PROC_AVAIL 2 // this proc can be scheduled
 #define PROC_CURR 3 // this proc is currently running
 #define PROC_IO_WAIT 4 // this proc is blocked waiting on IO
+#define PROC_SEM_WAIT 5 // this proc is blocked on a semaphore
 
 #define NUM_PROC 10
 #define NULL_PROC 0
@@ -36,5 +37,17 @@ extern int create(void *func, unsigned int stack_size, int priority);
 
 /* must be called with interrupts off */
 extern void make_avail(int pid);
+
+#define NSEM 8
+
+void sem_init(void);
+int sem_create(int initial);
+void sem_wait(int s);
+void sem_signal(int s);
+int sem_count(int s);
+
+int mutex_create(void);
+void mutex_lock(int m);
+void mutex_unlock(int m);
 
 #endif // PROC_H

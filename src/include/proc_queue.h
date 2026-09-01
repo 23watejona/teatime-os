@@ -3,8 +3,8 @@
 #include "proc.h"
 
 // Each process can be in at most one queue
-// and we have 2 extra entries for the head and tail of the ready list
-#define NUM_QENT (NUM_PROC + 2)
+// and we have 2 extra entries for the head and tail of each list
+#define NUM_QENT (NUM_PROC + 2 + 2 * NSEM)
 #define MIN_KEY (INT_MIN)
 #define MAX_KEY (INT_MAX)
 

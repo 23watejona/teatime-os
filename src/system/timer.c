@@ -8,7 +8,7 @@ extern void handle_cpu_timer_intr(void);
 void init_cpu_timer() {
     l1_interrupt_handlers[6] = handle_cpu_timer_intr;
     WRITE_REG(0x3ff00014, READ_REG(0x3ff00014) & 0xFFFFFFE);
-    asm("movi a12, 0\nwsr.ccount a12\nmovi a12, 800000\nwsr.ccompare0 a12\nrsync");
+    asm("movi a12, 0\nwsr.ccount a12\nwsr.ccompare0 %0\nrsync" : : "r"(TICK_CYCLES) : "a12");
     intr_unmask(1 << 6); // Enable CPU_CLK interrupts
     unsigned int intmask = 0;
     asm("rsr.intenable %r0" : "=r"(intmask));

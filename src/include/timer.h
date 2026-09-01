@@ -7,6 +7,8 @@ static inline unsigned int ccount(void) {
     return c;
 }
 
+#define TICK_CYCLES 80000 /* 1 ms at 80 MHz */
+
 struct frc1_t {
     struct {
         unsigned int data: 23;
@@ -33,7 +35,6 @@ struct frc1_t {
 };
 
 extern volatile struct frc1_t frc1;
-
 
 _Static_assert(sizeof(struct frc1_t) == 16, "sizeof(struct frc1_t) != 16");
 
