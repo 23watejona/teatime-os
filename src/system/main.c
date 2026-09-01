@@ -39,7 +39,7 @@ void main(void)
     if (ping_test_pid >= 0)
         make_avail(ping_test_pid);
 
-    int echo_app_pid = create(echo_app_proc, 2048, 5);
+    int echo_app_pid = create(echo_app_proc, 4096, 5);
     if (echo_app_pid >= 0)
         make_avail(echo_app_pid);
     while (1)
