@@ -18,6 +18,7 @@ typedef void (*icmp_echo_reply_handler)(struct ipv4_addr src);
 
 int icmp_on_echo_reply(icmp_echo_reply_handler fn);
 
-void icmp_recv(struct ipv4_addr src, unsigned char *payload, unsigned int len);
+void icmp_recv(unsigned char *buf, unsigned int ihl, unsigned int total_len,
+               const unsigned char *sa);
 
 #endif

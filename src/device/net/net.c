@@ -157,28 +157,28 @@ static void arp_recv(u8 *payload, unsigned int len) {
     }
 }
 
-void net_recv(unsigned char *llc, unsigned int len) {
+void net_recv(unsigned char *llc, unsigned int len, const unsigned char *sa) {
     if (len < LLC_SNAP_LEN)
         return;
     unsigned int et = ntohs(*(const unsigned short *) (llc + LLC_SNAP_LEN - 2));
     switch (et) {
-    case ETHERTYPE_ARP:
-        arp_recv(llc + LLC_SNAP_LEN, len - LLC_SNAP_LEN);
-        break;
-    case ETHERTYPE_IPV4: {
-        u8 *ip = llc + LLC_SNAP_LEN;
-        len -= LLC_SNAP_LEN;
-        if (len < sizeof(union ipv4_header))
-            return;
-        union ipv4_header *h = (union ipv4_header *) ip;
-        unsigned int total_len = ntohs(h->fields.total_len);
-        if (total_len > len)
-            return;
-        ipv4_enqueue(ip, total_len);
-        break;
-    }
-    default:
-        break;
+        case ETHERTYPE_ARP:
+            arp_recv(llc + LLC_SNAP_LEN, len - LLC_SNAP_LEN);
+            break;
+        case ETHERTYPE_IPV4: {
+            u8 *ip = llc + LLC_SNAP_LEN;
+            len -= LLC_SNAP_LEN;
+            if (len < sizeof(union ipv4_header))
+                return;
+            union ipv4_header *h = (union ipv4_header *) ip;
+            unsigned int total_len = ntohs(h->fields.total_len);
+            if (total_len > len)
+                return;
+            ipv4_enqueue(ip, total_len, sa);
+            break;
+        }
+        default:
+            break;
     }
 }
 

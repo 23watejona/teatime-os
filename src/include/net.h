@@ -7,7 +7,7 @@ void net_init(void);
 
 void net_tick(void);
 
-void net_recv(unsigned char *llc, unsigned int len);
+void net_recv(unsigned char *llc, unsigned int len, const unsigned char *sa);
 
 /* Resolves the next hop over ARP; may park the caller. L3 process context
    only. pkt needs 8 bytes of headroom. */

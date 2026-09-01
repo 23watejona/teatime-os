@@ -15,6 +15,7 @@ extern struct ipv4_addr local_ip;
 
 // the servicer copies each packet in behind 8 bytes of headroom, so a reply can be built in place without a second copy
 struct ipv4_slot {
+    u8 sa[6];
     unsigned int len;
     u8 data[8 + IPV4_MTU] __attribute__((aligned(4)));
 };
@@ -48,7 +49,7 @@ unsigned short checksum(const void *addr, int count, unsigned int start) {
     return (unsigned short)~sum;
 }
 
-static void ipv4_recv(u8 *buf, unsigned int len) {
+static void ipv4_recv(u8 *buf, unsigned int len, const u8 *sa) {
     union ipv4_header *h = (union ipv4_header *) buf;
     unsigned int ihl = (h->fields.version_ihl & 0x0f) * 4;
     if (ihl < sizeof(union ipv4_header) || len < ihl)
@@ -63,7 +64,7 @@ static void ipv4_recv(u8 *buf, unsigned int len) {
     switch (h->fields.protocol) {
         case IPPROTO_ICMP:
             if (to_us)
-                icmp_recv(src, payload, payload_len);
+                icmp_recv(buf, ihl, len, sa);
             break;
         case IPPROTO_UDP:
             if (to_us && payload_len >= sizeof(union udp_header))
@@ -72,12 +73,14 @@ static void ipv4_recv(u8 *buf, unsigned int len) {
     }
 }
 
-void ipv4_enqueue(const unsigned char *pkt, unsigned int len) {
+void ipv4_enqueue(const unsigned char *pkt, unsigned int len,
+                  const unsigned char *sa) {
     if (len > IPV4_MTU)
         return;
     if (ring_head - ring_tail >= IPV4_RING_SLOTS)
         return;
     struct ipv4_slot *s = &ring[ring_head & (IPV4_RING_SLOTS - 1)];
+    memcpy(s->sa, sa, 6);
     memcpy(s->data + 8, pkt, len);
     s->len = len;
     ring_head = ring_head + 1;
@@ -88,7 +91,7 @@ void ipv4_proc(void) {
     while (1) {
         sem_wait(ring_sem);
         struct ipv4_slot *s = &ring[ring_tail & (IPV4_RING_SLOTS - 1)];
-        ipv4_recv(s->data + 8, s->len);
+        ipv4_recv(s->data + 8, s->len, s->sa);
         ring_tail = ring_tail + 1;
     }
 }

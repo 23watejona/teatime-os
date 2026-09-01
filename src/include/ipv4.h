@@ -56,7 +56,8 @@ void ipv4_init(void);
 void ipv4_proc(void);
 
 /* Servicer-only producer. Copies the packet (already trimmed to its total
-   length) into the ring; drops when full. */
-void ipv4_enqueue(const unsigned char *pkt, unsigned int len);
+   length) and the sender's link address into the ring; drops when full. */
+void ipv4_enqueue(const unsigned char *pkt, unsigned int len,
+                  const unsigned char *sa);
 
 #endif
