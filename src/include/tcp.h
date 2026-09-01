@@ -32,6 +32,9 @@ int tcp_listen(unsigned short port, const struct tcp_events *ev);
    there is no connection, len is 0 or over TCP_MSS, or the connection dies. */
 int tcp_send(const unsigned char *buf, unsigned int len);
 
+/* Sends our FIN and returns; closed(0) fires once the exchange completes. */
+void tcp_close(void);
+
 void tcp_recv(struct ipv4_addr src, unsigned char *seg, unsigned int len);
 
 void tcp_init(void);

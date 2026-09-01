@@ -10,6 +10,9 @@
 #define SYN_RCVD 1
 #define ESTABLISHED 2
 #define CLOSE_WAIT 3
+#define FIN_WAIT_1 4
+#define FIN_WAIT_2 5
+#define LAST_ACK 6
 
 #define FLAG_FIN 0x01
 #define FLAG_SYN 0x02
@@ -218,6 +221,12 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             if (tcp_ctrl.state == SYN_RCVD) {
                 tcp_ctrl.state = ESTABLISHED;
                 tcp_ctrl.ev.connected();
+            } else if (tcp_ctrl.state == FIN_WAIT_1) {
+                tcp_ctrl.state = FIN_WAIT_2;
+            } else if (tcp_ctrl.state == LAST_ACK) {
+                close();
+                tcp_ctrl.ev.closed(0);
+                return;
             }
         }
     }
@@ -233,13 +242,22 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         tcp_ctrl.ev.data(seg + dataoff, plen);
     }
 
-    if ((h->flags & FLAG_FIN) && tcp_ctrl.state == ESTABLISHED) {
-        if (plen == 0 && seq != tcp_ctrl.rcv_nxt)
+    if (h->flags & FLAG_FIN) {
+        if (plen == 0 && seq != tcp_ctrl.rcv_nxt) {
+            send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
             return;
-        tcp_ctrl.rcv_nxt += 1;
-        send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
-        tcp_ctrl.state = CLOSE_WAIT;
-        tcp_ctrl.ev.data(NULL, 0);
+        }
+        if (tcp_ctrl.state == ESTABLISHED) {
+            tcp_ctrl.rcv_nxt += 1;
+            send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
+            tcp_ctrl.state = CLOSE_WAIT;
+            tcp_ctrl.ev.data(NULL, 0);
+        } else if (tcp_ctrl.state == FIN_WAIT_2) {
+            tcp_ctrl.rcv_nxt += 1;
+            send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
+            close();
+            tcp_ctrl.ev.closed(0);
+        }
     }
 }
 
@@ -269,6 +287,17 @@ int tcp_send(const unsigned char *buf, unsigned int len) {
     int err = tcp_ctrl.send_err;
     mutex_unlock(tcp_ctrl_mutex);
     return err;
+}
+
+void tcp_close(void) {
+    mutex_lock(tcp_ctrl_mutex);
+    if ((tcp_ctrl.state == ESTABLISHED || tcp_ctrl.state == CLOSE_WAIT)
+        && tcp_ctrl.snd_una == tcp_ctrl.snd_nxt) {
+        tcp_ctrl.state = tcp_ctrl.state == ESTABLISHED ? FIN_WAIT_1 : LAST_ACK;
+        tcp_ctrl.snd_nxt += 1;
+        send_new(FLAG_FIN | FLAG_ACK, NULL, 0);
+    }
+    mutex_unlock(tcp_ctrl_mutex);
 }
 
 static void tcp_tick(void) {
