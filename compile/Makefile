@@ -77,10 +77,6 @@ prog.elf: $(OBJ) prog.ld peri.ld
 
 $(OBJ): | $(AP_SECRETS)
 
-$(BUILD_DIR)/device/wifi/wifi_crypto.o $(BUILD_DIR)/device/wifi/wifi_ccmp.o \
-$(BUILD_DIR)/device/net/net.o $(BUILD_DIR)/device/wifi/wifi_wpa.o \
-$(BUILD_DIR)/device/wifi/wifi_ap_scan.o $(BUILD_DIR)/system/ipv4.o \
-$(BUILD_DIR)/system/udp.o: CFLAGS += -Os
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"
