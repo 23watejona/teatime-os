@@ -7,8 +7,15 @@
 void sched();
 void io_clock();
 
-void handle_cpu_timer_intr(void) {
+volatile unsigned int clktime;
+static unsigned int tick_in_sec;
+
+IRAM_ATTR void handle_cpu_timer_intr(void) {
     wdt_feed();
+    if (++tick_in_sec == TICKS_PER_SEC) {
+        tick_in_sec = 0;
+        clktime++;
+    }
     asm("rsr.ccount a0\nadd a0, a0, %0\nwsr.ccompare0 a0\nrsync" : : "r"(TICK_CYCLES) : "a0");
     io_clock();
     /* pulse the arm gate so pending NMI events make a fresh edge.

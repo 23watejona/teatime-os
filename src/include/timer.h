@@ -8,6 +8,10 @@ static inline unsigned int ccount(void) {
 }
 
 #define TICK_CYCLES 80000 /* 1 ms at 80 MHz */
+#define TICKS_PER_SEC 1000
+
+/* seconds since boot */
+extern volatile unsigned int clktime;
 
 struct frc1_t {
     struct {
