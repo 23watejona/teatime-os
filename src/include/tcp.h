@@ -3,6 +3,8 @@
 
 #include "ipv4.h"
 
+#define TCP_MSS 536
+
 struct tcp_header {
     unsigned short src_port;
     unsigned short dst_port;
@@ -25,6 +27,10 @@ struct tcp_events {
 };
 
 int tcp_listen(unsigned short port, const struct tcp_events *ev);
+
+/* Blocks until the segment is acked; buf must stay valid meanwhile. -1 if
+   there is no connection, len is 0 or over TCP_MSS, or the connection dies. */
+int tcp_send(const unsigned char *buf, unsigned int len);
 
 void tcp_recv(struct ipv4_addr src, unsigned char *seg, unsigned int len);
 

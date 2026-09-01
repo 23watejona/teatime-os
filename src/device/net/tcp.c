@@ -14,13 +14,13 @@
 #define FLAG_FIN 0x01
 #define FLAG_SYN 0x02
 #define FLAG_RST 0x04
+#define FLAG_PSH 0x08
 #define FLAG_ACK 0x10
 
 #define OPT_MSS 2
 #define OPT_MSS_LEN 4
 
-#define TCP_MSS 536
-#define TCP_WINDOW 1072
+#define TCP_WINDOW (2 * TCP_MSS)
 
 #define RTO_INITIAL 80000000u /* ~1 s */
 #define MAX_RETRIES 5
@@ -48,16 +48,21 @@ static struct {
     unsigned int snd_una;
     unsigned int snd_nxt;
     unsigned int rcv_nxt;
+    u8 tx_flags;
+    const u8 *tx_data;
+    unsigned int tx_len;
     unsigned int retries;
     unsigned int last_send;
     unsigned int rto_cycles;
+    int sender;
+    int send_err;
     struct tcp_events ev;
 } tcp_ctrl;
 
 static int tcp_ctrl_mutex;
 
 // send_ipv4_raw prepends the ipv4 and snap headers in place
-static u8 tx_buf[sizeof(struct tcp_header) + OPT_MSS_LEN + 28] __attribute__((aligned(4)));
+static u8 tx_buf[sizeof(struct tcp_header) + OPT_MSS_LEN + TCP_MSS + 28] __attribute__((aligned(4)));
 
 void tcp_init(void) {
     tcp_ctrl_mutex = mutex_create();
@@ -78,7 +83,8 @@ int tcp_listen(unsigned short port, const struct tcp_events *ev) {
 
 static void send_segment(struct ipv4_addr dst, unsigned short src_port,
                          unsigned short dst_port, unsigned int seq,
-                         unsigned int ack, u8 flags) {
+                         unsigned int ack, u8 flags, const u8 *data,
+                         unsigned int len) {
     struct tcp_header *h = (struct tcp_header *) tx_buf;
     unsigned int hdrlen = sizeof(struct tcp_header);
     h->src_port = htons(src_port);
@@ -98,36 +104,59 @@ static void send_segment(struct ipv4_addr dst, unsigned short src_port,
         hdrlen += OPT_MSS_LEN;
     }
     h->data_offset = hdrlen / 4;
+    memcpy(tx_buf + hdrlen, data, len);
 
     struct tcp_pseudo p;
     p.src_addr = local_ip.word;
     p.dst_addr = dst.word;
     p.zero = 0;
     p.protocol = IPPROTO_TCP;
-    p.length = htons(hdrlen);
+    p.length = htons(hdrlen + len);
     unsigned int sum = checksum_partial(0, &p, sizeof(p));
-    h->checksum = checksum(tx_buf, hdrlen, sum); /* unlike UDP, zero goes out as-is */
+    h->checksum = checksum(tx_buf, hdrlen + len, sum); // tcp has no "no checksum" value, so a zero result goes out as-is
 
-    send_ipv4_raw(local_ip, dst, IPPROTO_TCP, tx_buf, hdrlen);
+    send_ipv4_raw(local_ip, dst, IPPROTO_TCP, tx_buf, hdrlen + len);
 }
 
 static void send_rst(struct ipv4_addr dst, unsigned short src_port,
                      unsigned short dst_port, unsigned int seq) {
-    send_segment(dst, src_port, dst_port, seq, 0, FLAG_RST);
+    send_segment(dst, src_port, dst_port, seq, 0, FLAG_RST, NULL, 0);
 }
 
-static void send(unsigned int seq, u8 flags) {
+static void send(unsigned int seq, u8 flags, const u8 *data, unsigned int len) {
     send_segment(tcp_ctrl.remote_ip, tcp_ctrl.local_port, tcp_ctrl.remote_port,
-                 seq, tcp_ctrl.rcv_nxt, flags);
+                 seq, tcp_ctrl.rcv_nxt, flags, data, len);
+}
+
+static void send_unacked(void) {
+    unsigned int outstanding = tcp_ctrl.snd_nxt - tcp_ctrl.snd_una;
+    unsigned int acked = outstanding < tcp_ctrl.tx_len ? tcp_ctrl.tx_len - outstanding : 0;
+    send(tcp_ctrl.snd_una, tcp_ctrl.tx_flags, tcp_ctrl.tx_data + acked,
+         tcp_ctrl.tx_len - acked);
+    tcp_ctrl.last_send = ccount();
+}
+
+static void send_new(u8 flags, const u8 *data, unsigned int len) {
+    tcp_ctrl.tx_flags = flags;
+    tcp_ctrl.tx_data = data;
+    tcp_ctrl.tx_len = len;
+    tcp_ctrl.retries = 0;
+    tcp_ctrl.rto_cycles = RTO_INITIAL;
+    send_unacked();
 }
 
 static void close(void) {
     unsigned short port = tcp_ctrl.local_port;
     struct tcp_events ev = tcp_ctrl.ev;
+    int sender = tcp_ctrl.sender;
     memset(&tcp_ctrl, 0, sizeof(tcp_ctrl));
     tcp_ctrl.local_port = port;
     tcp_ctrl.ev = ev;
     tcp_ctrl.state = LISTEN;
+    if (sender) {
+        tcp_ctrl.send_err = -1;
+        io_signal();
+    }
 }
 
 static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
@@ -150,11 +179,8 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             tcp_ctrl.rcv_nxt = seq + 1;
             tcp_ctrl.snd_una = iss;
             tcp_ctrl.snd_nxt = iss + 1;
-            send(iss, FLAG_SYN | FLAG_ACK);
             tcp_ctrl.state = SYN_RCVD;
-            tcp_ctrl.retries = 0;
-            tcp_ctrl.last_send = ccount();
-            tcp_ctrl.rto_cycles = RTO_INITIAL;
+            send_new(FLAG_SYN | FLAG_ACK, NULL, 0);
         } else if (h->flags & FLAG_ACK) {
             send_rst(src, tcp_ctrl.local_port, ntohs(h->src_port), ack);
         }
@@ -176,27 +202,34 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
     }
 
     if ((h->flags & FLAG_SYN) && tcp_ctrl.state == SYN_RCVD) {
-        send(tcp_ctrl.snd_una, FLAG_SYN | FLAG_ACK);
+        send_unacked();
         return;
     }
 
     if ((h->flags & FLAG_ACK) && SEQ_LT(tcp_ctrl.snd_una, ack)
         && SEQ_LEQ(ack, tcp_ctrl.snd_nxt)) {
         tcp_ctrl.snd_una = ack;
-        if (tcp_ctrl.snd_una == tcp_ctrl.snd_nxt && tcp_ctrl.state == SYN_RCVD) {
-            tcp_ctrl.state = ESTABLISHED;
-            tcp_ctrl.ev.connected();
+        if (tcp_ctrl.snd_una == tcp_ctrl.snd_nxt) {
+            if (tcp_ctrl.sender) {
+                tcp_ctrl.sender = 0;
+                tcp_ctrl.send_err = 0;
+                io_signal();
+            }
+            if (tcp_ctrl.state == SYN_RCVD) {
+                tcp_ctrl.state = ESTABLISHED;
+                tcp_ctrl.ev.connected();
+            }
         }
     }
 
     unsigned int plen = len - dataoff;
     if (plen > 0) {
         if (seq != tcp_ctrl.rcv_nxt) {
-            send(tcp_ctrl.snd_nxt, FLAG_ACK);
+            send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
             return;
         }
         tcp_ctrl.rcv_nxt += plen;
-        send(tcp_ctrl.snd_nxt, FLAG_ACK);
+        send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
         tcp_ctrl.ev.data(seg + dataoff, plen);
     }
 
@@ -204,7 +237,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         if (plen == 0 && seq != tcp_ctrl.rcv_nxt)
             return;
         tcp_ctrl.rcv_nxt += 1;
-        send(tcp_ctrl.snd_nxt, FLAG_ACK);
+        send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
         tcp_ctrl.state = CLOSE_WAIT;
         tcp_ctrl.ev.data(NULL, 0);
     }
@@ -216,18 +249,39 @@ void tcp_recv(struct ipv4_addr src, unsigned char *seg, unsigned int len) {
     mutex_unlock(tcp_ctrl_mutex);
 }
 
+int tcp_send(const unsigned char *buf, unsigned int len) {
+    if (len == 0 || len > TCP_MSS)
+        return -1;
+    mutex_lock(tcp_ctrl_mutex);
+    if ((tcp_ctrl.state != ESTABLISHED && tcp_ctrl.state != CLOSE_WAIT)
+        || tcp_ctrl.snd_una != tcp_ctrl.snd_nxt) {
+        mutex_unlock(tcp_ctrl_mutex);
+        return -1;
+    }
+    tcp_ctrl.sender = 1;
+    tcp_ctrl.snd_nxt += len;
+    send_new(FLAG_PSH | FLAG_ACK, buf, len);
+    while (tcp_ctrl.sender) {
+        mutex_unlock(tcp_ctrl_mutex);
+        io_wait();
+        mutex_lock(tcp_ctrl_mutex);
+    }
+    int err = tcp_ctrl.send_err;
+    mutex_unlock(tcp_ctrl_mutex);
+    return err;
+}
+
 static void tcp_tick(void) {
     mutex_lock(tcp_ctrl_mutex);
-    if (tcp_ctrl.state == SYN_RCVD
+    if (tcp_ctrl.snd_una != tcp_ctrl.snd_nxt
         && ccount() - tcp_ctrl.last_send >= tcp_ctrl.rto_cycles) {
         if (tcp_ctrl.retries >= MAX_RETRIES) {
             close();
             tcp_ctrl.ev.closed(-1);
         } else {
-            send(tcp_ctrl.snd_una, FLAG_SYN | FLAG_ACK);
             tcp_ctrl.retries += 1;
             tcp_ctrl.rto_cycles <<= 1;
-            tcp_ctrl.last_send = ccount();
+            send_unacked();
         }
     }
     mutex_unlock(tcp_ctrl_mutex);
