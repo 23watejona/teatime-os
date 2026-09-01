@@ -97,8 +97,14 @@ struct uart_ctrl {
     } conf0;
 
     struct {
-        unsigned int x;
-
+        unsigned int rxfifo_full_threshold: 7;
+        unsigned int reserved1: 1;
+        unsigned int txfifo_empty_threshold: 7;
+        unsigned int reserved2: 1;
+        unsigned int rx_flow_threshold: 7;
+        unsigned int rx_flow_enable: 1;
+        unsigned int rx_timeout_threshold: 7;
+        unsigned int rx_timeout_enable: 1;
     } conf1;
 
     struct {

@@ -10,5 +10,6 @@
 #define NUM_L1_INTR 14
 extern void (*l1_interrupt_handlers[NUM_L1_INTR])(void);
 unsigned int intr_unmask(unsigned int mask);
+void _set_vec_base(void);
 
 #endif

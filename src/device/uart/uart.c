@@ -2,10 +2,21 @@
 #include "uart.h"
 #include "dev.h"
 #include "proc.h"
+#include "intr.h"
 
 char *itoau(int, char *, int);
 char *itoa(int, char *, int);
 
+#define RX_RING_SIZE 256
+#define RX_FULL_THRESHOLD 64
+#define RX_TIMEOUT_THRESHOLD 2
+#define TX_EMPTY_THRESHOLD 64
+
+static unsigned char rx_ring[RX_RING_SIZE];
+static volatile unsigned int rx_head;
+static volatile unsigned int rx_tail;
+static volatile unsigned int rx_dropped;
+static int rx_mutex;
 static int tx_mutex;
 
 inline __attribute__((always_inline)) unsigned int uart0_tx_fifo_size() {
@@ -80,21 +91,82 @@ void kprintf_uart(char *f, ...) {
     uart0_flush();
 }
 
+static void uart_intr(void) {
+    int tx_drained = uart0.int_status.txfifo_empty;
+    // clear before draining, so a byte that lands after the drain raises its own timeout event
+    uart0.int_clear.rxfifo_full = 1;
+    uart0.int_clear.rxfifo_timeout = 1;
+    uart0.int_clear.txfifo_empty = 1;
+    if (tx_drained) /* level-held until the writer refills; it re-arms */
+        uart0.int_enable.txfifo_empty = 0;
+    while (uart0.status.rx_fifo_count) {
+        unsigned char c = uart0.fifo.rw;
+        if (rx_head - rx_tail < RX_RING_SIZE) {
+            rx_ring[rx_head & (RX_RING_SIZE - 1)] = c;
+            rx_head = rx_head + 1;
+        } else {
+            rx_dropped = rx_dropped + 1;
+        }
+    }
+    io_signal();
+}
+
+static int uart_read(struct dev *d, void *buf, unsigned int n) {
+    unsigned char *out = buf;
+    unsigned int got = 0;
+    mutex_lock(rx_mutex);
+    while (rx_head == rx_tail)
+        io_wait();
+    while (got < n && rx_head != rx_tail) {
+        out[got] = rx_ring[rx_tail & (RX_RING_SIZE - 1)];
+        rx_tail = rx_tail + 1;
+        got++;
+    }
+    mutex_unlock(rx_mutex);
+    return got;
+}
+
 static int uart_write(struct dev *d, const void *buf, unsigned int n) {
     const unsigned char *in = buf;
+    unsigned int sent = 0;
     mutex_lock(tx_mutex);
-    for (unsigned int i = 0; i < n; i++) {
-        while (uart0_tx_fifo_full());
-        uart0.fifo.rw = in[i];
+    while (sent < n) {
+        while (sent < n && !uart0_tx_fifo_full()) {
+            uart0.fifo.rw = in[sent];
+            sent++;
+        }
+        if (sent < n) {
+            uart0.int_enable.txfifo_empty = 1;
+            io_wait();
+        }
     }
     mutex_unlock(tx_mutex);
     return n;
 }
 
 const struct dev_ops uart_ops = {
+    .read = uart_read,
     .write = uart_write,
 };
 
 void uart_init(void) {
+    rx_mutex = mutex_create();
     tx_mutex = mutex_create();
+    uart0.int_enable.rxfifo_full = 0;
+    uart0.int_enable.txfifo_empty = 0;
+    uart0.int_enable.rxfifo_timeout = 0;
+    uart0.conf1.rxfifo_full_threshold = RX_FULL_THRESHOLD;
+    uart0.conf1.txfifo_empty_threshold = TX_EMPTY_THRESHOLD;
+    uart0.conf1.rx_flow_enable = 0;
+    uart0.conf1.rx_timeout_threshold = RX_TIMEOUT_THRESHOLD;
+    uart0.conf1.rx_timeout_enable = 1;
+    while (uart0.status.rx_fifo_count)
+        (void)uart0.fifo.rw;
+    uart0.int_clear.rxfifo_full = 1;
+    uart0.int_clear.rxfifo_timeout = 1;
+    uart0.int_clear.txfifo_empty = 1;
+    l1_interrupt_handlers[INUM_UART] = uart_intr;
+    uart0.int_enable.rxfifo_full = 1;
+    uart0.int_enable.rxfifo_timeout = 1;
+    intr_unmask(1u << INUM_UART);
 }
