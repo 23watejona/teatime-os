@@ -5,7 +5,7 @@
 #define PROC_UNAVAIL 1 // this proc is used, but cannot be scheduled
 #define PROC_AVAIL 2 // this proc can be scheduled
 #define PROC_CURR 3 // this proc is currently running
-#define PROC_IO_WAIT 4 // this proc is blocked waiting on IO
+#define PROC_COND_WAIT 4 // this proc is blocked on a condition
 #define PROC_SEM_WAIT 5 // this proc is blocked on a semaphore
 
 #define NUM_PROC 10
@@ -37,14 +37,25 @@ extern int create(void *func, unsigned int stack_size, int priority);
 
 extern void make_avail(int pid);
 
-void io_wait_init(void);
-/* may be spurious, re-check the condition on wake */
-extern void io_wait(void);
-/* NMI-safe: only sets a flag; waiters wake at the next clock tick */
-extern void io_signal(void);
-extern void io_clock(void);
-
 #define NSEM 16
+#define NCOND 16
+#define MUTEX_NONE (-1)
+
+void cond_init(void);
+int cond_create(void);
+/* also broadcast by the clock every CLOCK_COND_PERIOD ticks: for retries,
+   give-up deadlines and pacing */
+int cond_create_clocked(void);
+extern int clock_cond; /* clocked, no other producer */
+/* mutex (or MUTEX_NONE) is released while parked; re-check the predicate on return */
+void cond_wait(int c, int mutex);
+void cond_signal(int c);
+void cond_broadcast(int c);
+/* L1 handler side: wakes a waiter now, else remembered for the next wait */
+void cond_signal_isr(int c);
+/* NMI side: flag only; the clock delivers it on the next tick */
+void cond_signal_nmi(int c);
+void cond_clock(void);
 
 void sem_init(void);
 int sem_create(int initial);

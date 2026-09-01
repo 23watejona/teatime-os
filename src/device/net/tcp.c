@@ -72,6 +72,7 @@ static struct {
 static u8 rx_ring[RX_RING_SIZE];
 
 static int tcp_ctrl_mutex;
+static int tcp_cond;
 
 // send_ipv4_raw prepends the ipv4 and snap headers in place
 static u8 tx_buf[sizeof(struct tcp_header) + OPT_MSS_LEN + TCP_MSS + 28] __attribute__((aligned(4)));
@@ -156,7 +157,7 @@ static void disconnect(void) {
     tcp_ctrl.local_port = port;
     if (sender)
         tcp_ctrl.send_err = -1;
-    io_signal();
+    cond_broadcast(tcp_cond);
 }
 
 static void rx_put(const u8 *data, unsigned int len) {
@@ -238,11 +239,11 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             if (tcp_ctrl.sender) {
                 tcp_ctrl.sender = 0;
                 tcp_ctrl.send_err = 0;
-                io_signal();
+                cond_broadcast(tcp_cond);
             }
             if (tcp_ctrl.state == SYN_RCVD) {
                 tcp_ctrl.state = ESTABLISHED;
-                io_signal();
+                cond_broadcast(tcp_cond);
             } else if (tcp_ctrl.state == FIN_WAIT_1) {
                 tcp_ctrl.state = FIN_WAIT_2;
             } else if (tcp_ctrl.state == LAST_ACK) {
@@ -262,7 +263,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         if (tcp_ctrl.state == ESTABLISHED) // after our fin nobody reads, so the data is acked but not buffered
             rx_put(seg + dataoff, plen);
         send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
-        io_signal();
+        cond_broadcast(tcp_cond);
     }
 
     if (h->flags & FLAG_FIN) {
@@ -275,7 +276,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
             send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
             tcp_ctrl.state = CLOSE_WAIT;
             tcp_ctrl.rx_eof = 1;
-            io_signal();
+            cond_broadcast(tcp_cond);
         } else if (tcp_ctrl.state == FIN_WAIT_2) {
             tcp_ctrl.rcv_nxt += 1;
             send(tcp_ctrl.snd_nxt, FLAG_ACK, NULL, 0);
@@ -300,9 +301,7 @@ static int send_data(const u8 *buf, unsigned int len) {
     tcp_ctrl.snd_nxt += len;
     send_new(FLAG_PSH | FLAG_ACK, buf, len);
     while (tcp_ctrl.sender) {
-        mutex_unlock(tcp_ctrl_mutex);
-        io_wait();
-        mutex_lock(tcp_ctrl_mutex);
+        cond_wait(tcp_cond, tcp_ctrl_mutex);
     }
     int err = tcp_ctrl.send_err;
     mutex_unlock(tcp_ctrl_mutex);
@@ -327,9 +326,7 @@ static int tcp_conn_read(struct dev *d, void *buf, unsigned int n) {
     mutex_lock(tcp_ctrl_mutex);
     while (tcp_ctrl.rx_head == tcp_ctrl.rx_tail && !tcp_ctrl.rx_eof
            && tcp_ctrl.state != CLOSED) {
-        mutex_unlock(tcp_ctrl_mutex);
-        io_wait();
-        mutex_lock(tcp_ctrl_mutex);
+        cond_wait(tcp_cond, tcp_ctrl_mutex);
     }
     int got;
     if (tcp_ctrl.rx_head != tcp_ctrl.rx_tail)
@@ -349,9 +346,7 @@ static int tcp_conn_close(struct dev *d) {
         send_new(FLAG_FIN | FLAG_ACK, NULL, 0);
     }
     while (tcp_ctrl.state != CLOSED) {
-        mutex_unlock(tcp_ctrl_mutex);
-        io_wait();
-        mutex_lock(tcp_ctrl_mutex);
+        cond_wait(tcp_cond, tcp_ctrl_mutex);
     }
     mutex_unlock(tcp_ctrl_mutex);
     return 0;
@@ -385,9 +380,7 @@ static int tcp_control(struct dev *d, int op, int arg) {
             while (!connected()) {
                 if (tcp_ctrl.state == CLOSED)
                     tcp_ctrl.state = LISTEN;
-                mutex_unlock(tcp_ctrl_mutex);
-                io_wait();
-                mutex_lock(tcp_ctrl_mutex);
+                cond_wait(tcp_cond, tcp_ctrl_mutex);
             }
             rc = dev_alloc("tcpconn");
             break;
@@ -415,6 +408,7 @@ static const struct dev_ops tcp_ops = {
 
 void tcp_init(void) {
     tcp_ctrl_mutex = mutex_create();
+    tcp_cond = cond_create();
     dev_register("tcp", &tcp_ops, NULL);
     dev_register("tcpconn", &tcp_conn_ops, NULL);
 }
@@ -436,7 +430,7 @@ static void tcp_tick(void) {
 
 void tcp_timer_proc(void) {
     while (1) {
-        io_wait();
+        cond_wait(clock_cond, MUTEX_NONE);
         tcp_tick();
     }
 }

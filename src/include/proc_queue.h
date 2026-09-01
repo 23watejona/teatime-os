@@ -4,7 +4,7 @@
 
 // Each process can be in at most one queue
 // and we have 2 extra entries for the head and tail of each list
-#define NUM_QENT (NUM_PROC + 2 * (2 + NSEM))
+#define NUM_QENT (NUM_PROC + 2 * (1 + NSEM + NCOND))
 #define MIN_KEY (INT_MIN)
 #define MAX_KEY (INT_MAX)
 
@@ -21,6 +21,7 @@ extern queue_entry *new_queue();
 extern void proc_enqueue(queue_entry *queue, int pid, int key);
 extern void proc_remove(int pid);
 extern int proc_dequeue(queue_entry *queue);
+extern int proc_queue_empty(queue_entry *queue);
 
 
 #endif // PROC_QUEUE_H

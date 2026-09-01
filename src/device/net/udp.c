@@ -23,12 +23,14 @@ struct udp_bind {
     int used;
     unsigned short port;
     struct udp_slot ring[UDP_RING_SLOTS];
-    volatile unsigned int head;
-    volatile unsigned int tail;
+    unsigned int head;
+    unsigned int tail;
     u8 tx[sizeof(union udp_header) + UDP_DATAGRAM_MAX + 28] __attribute__((aligned(4)));
 };
 
 static struct udp_bind binds[MAX_BINDS];
+static int udp_mutex;
+static int udp_cond;
 
 static int udp_open(struct dev *d, int arg) {
     struct udp_bind *b = d->state;
@@ -61,8 +63,9 @@ static int udp_read(struct dev *d, void *buf, unsigned int n) {
     struct udp_datagram *dg = buf;
     if (n < sizeof(*dg))
         return -1;
+    mutex_lock(udp_mutex);
     while (b->head == b->tail)
-        io_wait();
+        cond_wait(udp_cond, udp_mutex);
     struct udp_slot *slot = &b->ring[b->tail & (UDP_RING_SLOTS - 1)];
     unsigned int len = slot->len;
     if (len > n - sizeof(*dg))
@@ -72,6 +75,7 @@ static int udp_read(struct dev *d, void *buf, unsigned int n) {
     dg->len = len;
     memcpy(dg->data, slot->data, len);
     b->tail = b->tail + 1;
+    mutex_unlock(udp_mutex);
     return sizeof(*dg) + len;
 }
 
@@ -132,6 +136,8 @@ static const struct dev_ops udp_ops = {
 };
 
 void udp_init(void) {
+    udp_mutex = mutex_create();
+    udp_cond = cond_create();
     for (int i = 0; i < MAX_BINDS; i++)
         dev_register("udp", &udp_ops, &binds[i]);
 }
@@ -149,19 +155,21 @@ void udp_recv(struct ipv4_addr src, struct ipv4_addr dst,
     unsigned int sport = (dgram[0] << 8) | dgram[1];
     unsigned int dport = (dgram[2] << 8) | dgram[3];
     unsigned int plen = dlen - 8;
+    mutex_lock(udp_mutex);
     for (int i = 0; i < MAX_BINDS; i++) {
         struct udp_bind *b = &binds[i];
         if (!b->used || b->port != dport)
             continue;
         if (b->head - b->tail >= UDP_RING_SLOTS || plen > UDP_DATAGRAM_MAX)
-            return;
+            break;
         struct udp_slot *slot = &b->ring[b->head & (UDP_RING_SLOTS - 1)];
         slot->addr = src;
         slot->port = sport;
         slot->len = plen;
         memcpy(slot->data, dgram + 8, plen);
         b->head = b->head + 1;
-        io_signal();
-        return;
+        cond_broadcast(udp_cond);
+        break;
     }
+    mutex_unlock(udp_mutex);
 }

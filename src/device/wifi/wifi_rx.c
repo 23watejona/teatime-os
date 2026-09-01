@@ -21,9 +21,9 @@ extern void wifi_wpa_input(volatile unsigned char *buf, unsigned int len);
 extern void wifi_wpa_eapol(unsigned char *llc, unsigned int len);
 extern int wifi_ccmp_rx(volatile unsigned char *buf, unsigned int len, unsigned char *out);
 extern void net_recv(unsigned char *llc, unsigned int len, const unsigned char *sa);
-extern void net_tick(void);
 
 int wifi_rx_servicer_pid = -1;
+int wifi_rx_cond;
 volatile unsigned int wifi_rx_dropped;
 
 // zero means keep hopping channels 1..13
@@ -104,6 +104,10 @@ static void rx_dump(unsigned char *p, unsigned int len) {
     }
 }
 
+void wifi_rx_init(void) {
+    wifi_rx_cond = cond_create_clocked();
+}
+
 void wifi_rx_servicer(void) {
     unsigned int ch = 1;
     int locked_now = 0;
@@ -115,7 +119,6 @@ void wifi_rx_servicer(void) {
             stage_tail = stage_tail + 1;
         }
         wifi_station_tick();
-        net_tick();
 
         if (wifi_locked_channel) {
             if (locked_now != wifi_locked_channel) {
@@ -131,8 +134,7 @@ void wifi_rx_servicer(void) {
             }
         }
 
-        /* The NMI cannot wake this process; a frame staged after the drain is
-           handled on the next tick. */
-        io_wait();
+        // the nmi can only pend the cond, so a frame staged after the drain is handled on the next tick
+        cond_wait(wifi_rx_cond, MUTEX_NONE);
     }
 }

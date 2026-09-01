@@ -29,7 +29,7 @@ extern struct ipv4_addr net_mask;
 
 static const u8 bcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-static int arp_sem;
+static int arp_cond;
 static int tx_mutex;
 static int arp_cache_mutex;
 
@@ -53,8 +53,6 @@ struct arp_pkt {
     struct ipv4_addr target_ip;
 } __attribute__((packed));
 
-static unsigned int last_arp_wake;
-
 static unsigned int ccount(void) {
     unsigned int c;
     __asm__ volatile("rsr.ccount %0" : "=r"(c));
@@ -62,11 +60,10 @@ static unsigned int ccount(void) {
 }
 
 #define ARP_RETRY_INTERVAL 40000000u /* ~500 ms at 80 MHz */
-#define ARP_WAKE_INTERVAL  40000000u /* ~500 ms */
 #define ARP_TIMEOUT        240000000u /* ~3 s */
 
 void net_init(void) {
-    arp_sem = sem_create(0);
+    arp_cond = cond_create_clocked();
     tx_mutex = mutex_create();
     arp_cache_mutex = mutex_create();
 }
@@ -92,21 +89,17 @@ static void arp_cache_store(struct ipv4_addr ip, const u8 *mac) {
     memcpy(arp_cache[i].mac, mac, 6);
     if (i == arp_cache_next)
         arp_cache_next++;
+    cond_broadcast(arp_cond);
     mutex_unlock(arp_cache_mutex);
-    while (sem_count(arp_sem) < 0)
-        sem_signal(arp_sem);
 }
 
 static int arp_cache_lookup(struct ipv4_addr ip, u8 *mac) {
-    mutex_lock(arp_cache_mutex);
     for (int i = 0; i < arp_cache_next; i++) {
         if (arp_cache[i].ip.word == ip.word) {
             memcpy(mac, arp_cache[i].mac, 6);
-            mutex_unlock(arp_cache_mutex);
             return 0;
         }
     }
-    mutex_unlock(arp_cache_mutex);
     return -1;
 }
 
@@ -182,19 +175,6 @@ void net_recv(unsigned char *llc, unsigned int len, const unsigned char *sa) {
     }
 }
 
-void net_tick(void) {
-    if (wpa_state != WPA_DONE)
-        return;
-
-    unsigned int now = ccount();
-    /* every waiter is guaranteed a wake at least this often; give-up deadlines
-       are checked on wake */
-    if (now - last_arp_wake >= ARP_WAKE_INTERVAL) {
-        last_arp_wake = now;
-        while (sem_count(arp_sem) < 0)
-            sem_signal(arp_sem);
-    }
-}
 int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len) {
     if (wpa_state != WPA_DONE)
         return -1;
@@ -208,16 +188,22 @@ int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len) {
     u8 mac[6];
     unsigned int start = ccount();
     unsigned int last_request = start - ARP_RETRY_INTERVAL;
-    while (1) {
-        if (arp_cache_lookup(next, mac) == 0)
-            return net_tx_llc(mac, pkt, len + LLC_SNAP_LEN);
+    mutex_lock(arp_cache_mutex);
+    while (arp_cache_lookup(next, mac) < 0) {
         unsigned int now = ccount();
-        if (now - start >= ARP_TIMEOUT)
+        if (now - start >= ARP_TIMEOUT) {
+            mutex_unlock(arp_cache_mutex);
             return -1;
+        }
         if (now - last_request >= ARP_RETRY_INTERVAL) {
             last_request = now;
+            mutex_unlock(arp_cache_mutex);
             send_arp_request(next);
+            mutex_lock(arp_cache_mutex);
+            continue;
         }
-        sem_wait(arp_sem);
+        cond_wait(arp_cond, arp_cache_mutex);
     }
+    mutex_unlock(arp_cache_mutex);
+    return net_tx_llc(mac, pkt, len + LLC_SNAP_LEN);
 }

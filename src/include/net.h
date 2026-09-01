@@ -5,7 +5,6 @@
 
 void net_init(void);
 
-void net_tick(void);
 
 void net_recv(unsigned char *llc, unsigned int len, const unsigned char *sa);
 

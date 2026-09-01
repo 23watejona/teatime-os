@@ -24,8 +24,6 @@ static void echo_reply_recv(struct ipv4_addr src) {
 void dns_test_proc(void) {
     icmp_on_echo_reply(echo_reply_recv);
     while (!gateway_answered)
-        io_wait();
+        cond_wait(clock_cond, MUTEX_NONE);
     dns_test_send();
-    while (1)
-        io_wait();
 }

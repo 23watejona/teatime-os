@@ -8,7 +8,8 @@
 #define FIQ_MAC_TIMER (1u << 27)
 
 extern unsigned int wifi_rx_nmi_drain(void);
-extern void io_signal(void);
+extern int wifi_rx_cond;
+extern void cond_signal_nmi(int c);
 
 volatile unsigned int wifi_fiq_tx_count;
 
@@ -21,7 +22,7 @@ IRAM_ATTR void wifi_fiq_dispatch(void) {
         wifi_fiq_tx_count++;
 
     if (wifi_rx_nmi_drain())
-        io_signal();
+        cond_signal_nmi(wifi_rx_cond);
 
     WRITE_REG(MAC_INT_CLEAR, status);
 }

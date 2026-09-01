@@ -19,7 +19,7 @@ void ping_test_proc(void) {
     unsigned int last = ccount() - PERIOD_PING;
     while (1) {
         while (ccount() - last < PERIOD_PING)
-            io_wait();
+            cond_wait(clock_cond, MUTEX_NONE);
         last = ccount();
         u8 p[sizeof(struct icmp_echo) + 28];
         struct icmp_echo *e = (struct icmp_echo *) p;

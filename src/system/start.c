@@ -11,7 +11,7 @@
 
 #define NULL_STK 1024
 #define INIT_STK 2048
-#define SERVICER_STK 4096 /* WPA HMAC peak + a tick's frames measured ~2112 */
+#define SERVICER_STK 4096 // wpa hmac peak plus a tick's frames measured ~2112
 
 
 void ctxsw(unsigned int **, unsigned int **);
@@ -31,7 +31,7 @@ void init_wifi_mac_addr(void);
 void init_wifi_rf(void);
 void wifi_secrets_init(void);
 void wifi_set_channel(int);
-void startup_proc(void);
+void wifi_rx_init(void);
 void wifi_rx_servicer(void);
 void main(void);
 void dev_init(void);
@@ -111,7 +111,8 @@ IRAM_ATTR void start ( void )
     curr_pid = 0;
     avail_list = new_queue();
     sem_init();
-    io_wait_init();
+    cond_init();
+    wifi_rx_init();
     dev_init();
     net_init();
     ipv4_init();

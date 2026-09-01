@@ -62,7 +62,11 @@ IRAM_ATTR void proc_remove(int pid) {
     process_queue_entry->prev = NULL;
 }
 
-int proc_dequeue(queue_entry *queue) {
+IRAM_ATTR int proc_queue_empty(queue_entry *queue) {
+    return queue->next->next == NULL;
+}
+
+IRAM_ATTR int proc_dequeue(queue_entry *queue) {
     queue_entry *process_queue_entry = queue->next;
 
     // an empty queue yields the null process, so sched always has something to run

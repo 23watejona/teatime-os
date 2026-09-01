@@ -18,7 +18,9 @@ static volatile unsigned int rx_head;
 static volatile unsigned int rx_tail;
 static volatile unsigned int rx_dropped;
 static int rx_mutex;
+static int rx_cond;
 static int tx_mutex;
+static int tx_cond;
 
 inline __attribute__((always_inline)) unsigned int uart0_tx_fifo_size() {
     return uart0.status.tx_fifo_count;
@@ -98,8 +100,11 @@ static void uart_intr(void) {
     uart0.int_clear.rxfifo_full = 1;
     uart0.int_clear.rxfifo_timeout = 1;
     uart0.int_clear.txfifo_empty = 1;
-    if (tx_drained) /* level-held until the writer refills; it re-arms */
+    if (tx_drained) { // the empty condition holds until the writer refills, so mask it here and let uart_write re-arm
         uart0.int_enable.txfifo_empty = 0;
+        cond_signal_isr(tx_cond);
+    }
+    int received = uart0.status.rx_fifo_count != 0;
     while (uart0.status.rx_fifo_count) {
         unsigned char c = uart0.fifo.rw;
         if (rx_head - rx_tail < RX_RING_SIZE) {
@@ -109,7 +114,8 @@ static void uart_intr(void) {
             rx_dropped = rx_dropped + 1;
         }
     }
-    io_signal();
+    if (received)
+        cond_signal_isr(rx_cond);
 }
 
 static int uart_read(struct dev *d, void *buf, unsigned int n) {
@@ -117,7 +123,7 @@ static int uart_read(struct dev *d, void *buf, unsigned int n) {
     unsigned int got = 0;
     mutex_lock(rx_mutex);
     while (rx_head == rx_tail)
-        io_wait();
+        cond_wait(rx_cond, rx_mutex);
     while (got < n && rx_head != rx_tail) {
         out[got] = rx_ring[rx_tail & (RX_RING_SIZE - 1)];
         rx_tail = rx_tail + 1;
@@ -138,7 +144,7 @@ static int uart_write(struct dev *d, const void *buf, unsigned int n) {
         }
         if (sent < n) {
             uart0.int_enable.txfifo_empty = 1;
-            io_wait();
+            cond_wait(tx_cond, tx_mutex);
         }
     }
     mutex_unlock(tx_mutex);
@@ -152,7 +158,9 @@ static const struct dev_ops uart_ops = {
 
 void uart_init(void) {
     rx_mutex = mutex_create();
+    rx_cond = cond_create();
     tx_mutex = mutex_create();
+    tx_cond = cond_create();
     uart0.int_enable.rxfifo_full = 0;
     uart0.int_enable.txfifo_empty = 0;
     uart0.int_enable.rxfifo_timeout = 0;
