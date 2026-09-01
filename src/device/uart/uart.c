@@ -34,13 +34,10 @@ void uart0_flush() {
 }
 
 void kputc_uart(int c) {
-    // add '\r' before a newline
     if (c == '\n') {
-        // block until we can put a char
         while(uart0_tx_fifo_full());
         uart0.fifo.rw = '\r';
     }
-    // block until we can put a char
     while(uart0_tx_fifo_full());
     uart0.fifo.rw = c;
 }
