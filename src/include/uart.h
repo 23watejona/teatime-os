@@ -2,6 +2,7 @@
 #define UART_H
 
 #define UART_DEFAULT_BAUD (76800u)
+#define UART_FIFO_RESET (0x60000u)
 
 void kprintf_uart(char *f, ...);
 void kputc_uart(int c);

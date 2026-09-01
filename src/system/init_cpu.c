@@ -9,8 +9,8 @@
 void set_uart0_div(unsigned int clk_rate_mhz, unsigned int baud_rate) {
     unsigned int uart_clk_div = (clk_rate_mhz * 1000000) / baud_rate;
     uart0.clk_div.div_int = uart_clk_div;
-    uart0.conf0.x |= 0x6000;
-    uart0.conf0.x &= 0xfff9ffff;
+    uart0.conf0.x |= UART_FIFO_RESET;
+    uart0.conf0.x &= ~UART_FIFO_RESET;
 }
 
 void set_magic_clk_reg (unsigned int val1, unsigned int val2) {
