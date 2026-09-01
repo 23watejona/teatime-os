@@ -13,20 +13,21 @@ void dev_init(void) {
     devtab_mutex = mutex_create();
 }
 
-int dev_register(const char *name, const struct dev_ops *ops, void *state) {
-    int fd = -1;
+struct dev *dev_register(const char *name, const struct dev_ops *ops, void *state) {
+    struct dev *d = NULL;
     mutex_lock(devtab_mutex);
     for (int i = 0; i < NDEV; i++) {
         if (!devtab[i].name) {
-            devtab[i].name = name;
-            devtab[i].ops = ops;
-            devtab[i].state = state;
-            fd = i;
+            d = &devtab[i];
+            d->name = name;
+            d->ops = ops;
+            d->state = state;
+            d->cond = cond_create();
             break;
         }
     }
     mutex_unlock(devtab_mutex);
-    return fd;
+    return d;
 }
 
 int dev_alloc(const char *name) {

@@ -3,6 +3,7 @@
 #include "icmp.h"
 #include "dns.h"
 #include "proc.h"
+#include "timer.h"
 
 static void dns_test_send(void) {
     struct ipv4_addr resolver = {{1, 1, 1, 1}};
@@ -24,6 +25,6 @@ static void echo_reply_recv(struct ipv4_addr src) {
 void dns_test_proc(void) {
     icmp_on_echo_reply(echo_reply_recv);
     while (!gateway_answered)
-        cond_wait(clock_cond, MUTEX_NONE);
+        sleep(TICKS_PER_SEC / 10);
     dns_test_send();
 }

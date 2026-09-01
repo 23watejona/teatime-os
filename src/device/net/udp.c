@@ -22,6 +22,7 @@ struct udp_slot {
 struct udp_bind {
     int used;
     unsigned short port;
+    struct dev *dev;
     struct udp_slot ring[UDP_RING_SLOTS];
     unsigned int head;
     unsigned int tail;
@@ -30,7 +31,6 @@ struct udp_bind {
 
 static struct udp_bind binds[MAX_BINDS];
 static int udp_mutex;
-static int udp_cond;
 
 static int udp_open(struct dev *d, int arg) {
     struct udp_bind *b = d->state;
@@ -65,7 +65,7 @@ static int udp_read(struct dev *d, void *buf, unsigned int n) {
         return -1;
     mutex_lock(udp_mutex);
     while (b->head == b->tail)
-        cond_wait(udp_cond, udp_mutex);
+        cond_wait(b->dev->cond, udp_mutex);
     struct udp_slot *slot = &b->ring[b->tail & (UDP_RING_SLOTS - 1)];
     unsigned int len = slot->len;
     if (len > n - sizeof(*dg))
@@ -137,9 +137,9 @@ static const struct dev_ops udp_ops = {
 
 void udp_init(void) {
     udp_mutex = mutex_create();
-    udp_cond = cond_create();
-    for (int i = 0; i < MAX_BINDS; i++)
-        dev_register("udp", &udp_ops, &binds[i]);
+    for (int i = 0; i < MAX_BINDS; i++) {
+        binds[i].dev = dev_register("udp", &udp_ops, &binds[i]);
+    }
 }
 
 void udp_recv(struct ipv4_addr src, struct ipv4_addr dst,
@@ -168,7 +168,7 @@ void udp_recv(struct ipv4_addr src, struct ipv4_addr dst,
         slot->len = plen;
         memcpy(slot->data, dgram + 8, plen);
         b->head = b->head + 1;
-        cond_broadcast(udp_cond);
+        cond_broadcast(b->dev->cond);
         break;
     }
     mutex_unlock(udp_mutex);

@@ -7,6 +7,7 @@
 #define PROC_CURR 3 // this proc is currently running
 #define PROC_COND_WAIT 4 // this proc is blocked on a condition
 #define PROC_SEM_WAIT 5 // this proc is blocked on a semaphore
+#define PROC_TIMED_WAIT 6 // this proc is on the sleep list, with or without a condition
 
 #define NUM_PROC 10
 #define NULL_PROC 0
@@ -23,6 +24,7 @@ typedef struct proctab_entry {
     unsigned int *stk_ptr;
     unsigned int *stk_base; /* stack bottom word, holds STK_CANARY(pid) */
     int priority;
+    int timed_out; /* how the last timed wait ended */
 } proctab_entry;
 
 extern proctab_entry proctab[NUM_PROC];
@@ -43,19 +45,24 @@ extern void make_avail(int pid);
 
 void cond_init(void);
 int cond_create(void);
-/* also broadcast by the clock every CLOCK_COND_PERIOD ticks: for retries,
-   give-up deadlines and pacing */
-int cond_create_clocked(void);
-extern int clock_cond; /* clocked, no other producer */
 /* mutex (or MUTEX_NONE) is released while parked; re-check the predicate on return */
 void cond_wait(int c, int mutex);
+/* cond_wait bounded by delay ticks: 0 signalled, -1 timed out */
+int cond_timedwait(int c, int mutex, unsigned int delay);
 void cond_signal(int c);
 void cond_broadcast(int c);
-/* L1 handler side: wakes a waiter now, else remembered for the next wait */
+/* L1 handler side: wakes every waiter now, else remembered for the next wait */
 void cond_signal_isr(int c);
 /* NMI side: flag only; the clock delivers it on the next tick */
 void cond_signal_nmi(int c);
 void cond_clock(void);
+
+/* Parks the caller for delay ticks (1 ms each). */
+void sleep(unsigned int delay);
+void sleep_clock(void);
+/* cond.c only, caller masked: put the current process on / off the sleep list */
+void sleep_enqueue(int pid, unsigned int delay);
+void sleep_remove(int pid);
 
 void sem_init(void);
 int sem_create(int initial);

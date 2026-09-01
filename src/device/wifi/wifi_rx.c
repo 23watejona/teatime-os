@@ -5,6 +5,7 @@
 #include "wifi_dma.h"
 #include "wifi_sta.h"
 #include "proc.h"
+#include "timer.h"
 
 // RX_CURRENT is read-only and shows where the dma is, so the software head goes into RX_HEAD only when the dma isn't on it
 #define MAC_DMA_RX_HEAD     0x3ff20008
@@ -12,6 +13,7 @@
 
 /* Channel dwell: ~400 ms at 80 MHz, a few beacon intervals. */
 #define CHAN_DWELL_CYCLES   32000000u
+#define SERVICER_TICK (TICKS_PER_SEC / 10) /* station and channel timers */
 
 #define STAGE_SLOTS 4
 
@@ -105,7 +107,7 @@ static void rx_dump(unsigned char *p, unsigned int len) {
 }
 
 void wifi_rx_init(void) {
-    wifi_rx_cond = cond_create_clocked();
+    wifi_rx_cond = cond_create();
 }
 
 void wifi_rx_servicer(void) {
@@ -134,7 +136,7 @@ void wifi_rx_servicer(void) {
             }
         }
 
-        // the nmi can only pend the cond, so a frame staged after the drain is handled on the next tick
-        cond_wait(wifi_rx_cond, MUTEX_NONE);
+        // the nmi can only pend the cond until the next clock tick, so the wait is bounded rather than open-ended
+        cond_timedwait(wifi_rx_cond, MUTEX_NONE, SERVICER_TICK);
     }
 }

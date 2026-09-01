@@ -16,6 +16,7 @@ struct dev {
     const struct dev_ops *ops;
     void *state;
     int used;
+    int cond;
 };
 
 /* Every call may block: process context only. A descriptor is a global index,
@@ -29,8 +30,9 @@ int write(int fd, const void *buf, unsigned int n);
 int control(int fd, int op, int arg);
 
 /* Drivers only, at startup: adds a row; several rows may share a name,
-   one per descriptor the driver can hand out. -1 when the table is full. */
-int dev_register(const char *name, const struct dev_ops *ops, void *state);
+   one per descriptor the driver can hand out. NULL when the table is full.
+   The driver broadcasts the row's cond whenever that device changes. */
+struct dev *dev_register(const char *name, const struct dev_ops *ops, void *state);
 /* Drivers only: claims a free row of that name (an accepted connection),
    bypassing the row's open op. */
 int dev_alloc(const char *name);

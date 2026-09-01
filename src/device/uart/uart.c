@@ -18,9 +18,8 @@ static volatile unsigned int rx_head;
 static volatile unsigned int rx_tail;
 static volatile unsigned int rx_dropped;
 static int rx_mutex;
-static int rx_cond;
 static int tx_mutex;
-static int tx_cond;
+static struct dev *uart_dev;
 
 inline __attribute__((always_inline)) unsigned int uart0_tx_fifo_size() {
     return uart0.status.tx_fifo_count;
@@ -102,7 +101,7 @@ static void uart_intr(void) {
     uart0.int_clear.txfifo_empty = 1;
     if (tx_drained) { // the empty condition holds until the writer refills, so mask it here and let uart_write re-arm
         uart0.int_enable.txfifo_empty = 0;
-        cond_signal_isr(tx_cond);
+        cond_signal_isr(uart_dev->cond);
     }
     int received = uart0.status.rx_fifo_count != 0;
     while (uart0.status.rx_fifo_count) {
@@ -115,7 +114,7 @@ static void uart_intr(void) {
         }
     }
     if (received)
-        cond_signal_isr(rx_cond);
+        cond_signal_isr(uart_dev->cond);
 }
 
 static int uart_read(struct dev *d, void *buf, unsigned int n) {
@@ -123,7 +122,7 @@ static int uart_read(struct dev *d, void *buf, unsigned int n) {
     unsigned int got = 0;
     mutex_lock(rx_mutex);
     while (rx_head == rx_tail)
-        cond_wait(rx_cond, rx_mutex);
+        cond_wait(uart_dev->cond, rx_mutex);
     while (got < n && rx_head != rx_tail) {
         out[got] = rx_ring[rx_tail & (RX_RING_SIZE - 1)];
         rx_tail = rx_tail + 1;
@@ -144,7 +143,7 @@ static int uart_write(struct dev *d, const void *buf, unsigned int n) {
         }
         if (sent < n) {
             uart0.int_enable.txfifo_empty = 1;
-            cond_wait(tx_cond, tx_mutex);
+            cond_wait(uart_dev->cond, tx_mutex);
         }
     }
     mutex_unlock(tx_mutex);
@@ -158,9 +157,7 @@ static const struct dev_ops uart_ops = {
 
 void uart_init(void) {
     rx_mutex = mutex_create();
-    rx_cond = cond_create();
     tx_mutex = mutex_create();
-    tx_cond = cond_create();
     uart0.int_enable.rxfifo_full = 0;
     uart0.int_enable.txfifo_empty = 0;
     uart0.int_enable.rxfifo_timeout = 0;
@@ -178,5 +175,5 @@ void uart_init(void) {
     uart0.int_enable.rxfifo_full = 1;
     uart0.int_enable.rxfifo_timeout = 1;
     intr_unmask(1u << INUM_UART);
-    dev_register("uart0", &uart_ops, NULL);
+    uart_dev = dev_register("uart0", &uart_ops, NULL);
 }

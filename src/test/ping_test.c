@@ -2,25 +2,15 @@
 #include "ipv4.h"
 #include "icmp.h"
 #include "proc.h"
+#include "timer.h"
 
 extern struct ipv4_addr local_ip;
 extern struct ipv4_addr gw_ip;
 
-#define PERIOD_PING 80000000u /* ~1 s */
-
-static unsigned int ccount(void) {
-    unsigned int c;
-    asm volatile("rsr.ccount %0" : "=r"(c));
-    return c;
-}
-
 void ping_test_proc(void) {
     unsigned int seq = 0;
-    unsigned int last = ccount() - PERIOD_PING;
     while (1) {
-        while (ccount() - last < PERIOD_PING)
-            cond_wait(clock_cond, MUTEX_NONE);
-        last = ccount();
+        sleep(TICKS_PER_SEC);
         u8 p[sizeof(struct icmp_echo) + 28];
         struct icmp_echo *e = (struct icmp_echo *) p;
         e->type = ICMP_ECHO_REQUEST;

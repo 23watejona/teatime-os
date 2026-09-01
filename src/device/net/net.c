@@ -7,6 +7,7 @@
 #include "ipv4.h"
 #include "udp.h"
 #include "proc.h"
+#include "timer.h"
 
 #define MTU (1518)
 
@@ -53,17 +54,11 @@ struct arp_pkt {
     struct ipv4_addr target_ip;
 } __attribute__((packed));
 
-static unsigned int ccount(void) {
-    unsigned int c;
-    __asm__ volatile("rsr.ccount %0" : "=r"(c));
-    return c;
-}
-
-#define ARP_RETRY_INTERVAL 40000000u /* ~500 ms at 80 MHz */
-#define ARP_TIMEOUT        240000000u /* ~3 s */
+#define ARP_RETRY_TICKS (TICKS_PER_SEC / 2)
+#define ARP_RETRIES 6
 
 void net_init(void) {
-    arp_cond = cond_create_clocked();
+    arp_cond = cond_create();
     tx_mutex = mutex_create();
     arp_cache_mutex = mutex_create();
 }
@@ -186,23 +181,18 @@ int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len) {
     struct ipv4_addr next = ON_SUBNET(dst) ? dst : gw_ip;
 
     u8 mac[6];
-    unsigned int start = ccount();
-    unsigned int last_request = start - ARP_RETRY_INTERVAL;
+    unsigned int tries = 0;
     mutex_lock(arp_cache_mutex);
     while (arp_cache_lookup(next, mac) < 0) {
-        unsigned int now = ccount();
-        if (now - start >= ARP_TIMEOUT) {
+        if (tries == ARP_RETRIES) {
             mutex_unlock(arp_cache_mutex);
             return -1;
         }
-        if (now - last_request >= ARP_RETRY_INTERVAL) {
-            last_request = now;
-            mutex_unlock(arp_cache_mutex);
-            send_arp_request(next);
-            mutex_lock(arp_cache_mutex);
-            continue;
-        }
-        cond_wait(arp_cond, arp_cache_mutex);
+        mutex_unlock(arp_cache_mutex);
+        send_arp_request(next);
+        mutex_lock(arp_cache_mutex);
+        if (cond_timedwait(arp_cond, arp_cache_mutex, ARP_RETRY_TICKS) < 0)
+            tries++;
     }
     mutex_unlock(arp_cache_mutex);
     return net_tx_llc(mac, pkt, len + LLC_SNAP_LEN);
