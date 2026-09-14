@@ -43,6 +43,8 @@ void sem_signal(int s) {
         int pid = proc_dequeue(semtab[s].queue);
         make_avail(pid);
     }
+    if (need_resched)
+        sched();
     enable(m);
 }
 

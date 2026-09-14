@@ -73,6 +73,8 @@ IRAM_ATTR void syscall_handler (unsigned int exccause, unsigned int *frame) {
                 if (l1_interrupt_handlers[i])
                     l1_interrupt_handlers[i]();
             }
+            if (need_resched)
+                sched();
             break;
     }
 }

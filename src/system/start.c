@@ -152,14 +152,14 @@ IRAM_ATTR void start ( void )
     kprintf_uart("wifi: done\n");
     wdt_feed();
 
+    uart_init();
+    gpio_init();
+
     spawn(main, INIT_STK, 5);
     wifi_rx_servicer_pid = spawn(wifi_rx_servicer, SERVICER_STK, 10);
     spawn(ipv4_proc, SERVICER_STK, 8);
     spawn(tcp_timer_proc, SERVICER_STK, 5); // a resend runs the whole transmit path, wifi_ccmp_tx's 1600-byte frame included
 
-    // enable timer interrupt (WiFi RX is serviced via the NMI/FIQ path)
-    uart_init();
-    gpio_init();
     init_cpu_timer();
     while (1) {
         asm("waiti 0");

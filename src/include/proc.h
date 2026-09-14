@@ -34,6 +34,7 @@ extern int curr_pid;
 int disable(void);
 void enable(int mask);
 void sched(void);
+extern int need_resched;
 
 extern int create(void *func, unsigned int stack_size, int priority);
 /* create and make available; the pid, or -1 */

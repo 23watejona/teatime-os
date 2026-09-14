@@ -16,6 +16,7 @@ static void stk_smash(int pid, unsigned int val) {
 
 IRAM_ATTR void sched() {
     int m = disable();
+    need_resched = 0;
 
     for (int i = 0; i < NUM_PROC; ++i) {
         if (proctab[i].status != PROC_UNUSED && proctab[i].stk_base &&
