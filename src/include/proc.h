@@ -63,6 +63,8 @@ void cond_clock(void);
 
 /* Parks the caller for delay ticks (1 ms each). */
 void sleep(unsigned int delay);
+/* ticks since boot */
+unsigned int ticks(void);
 void sleep_clock(void);
 /* cond.c only, caller masked: put the current process on / off the sleep list */
 void sleep_enqueue(int pid, unsigned int delay);

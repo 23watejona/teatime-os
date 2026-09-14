@@ -77,7 +77,7 @@ IRAM_ATTR void start ( void )
 
     _set_vec_base();
     BUSY_WAIT();
-    init_cpu_clk(80);
+    init_cpu_clk(CPU_MHZ);
     initmem();
     boot_reset_cause = READ_REG(0x60000714) & 0xf; // 4 is the hardware wdt; read after the bss clear above, which would wipe it
     

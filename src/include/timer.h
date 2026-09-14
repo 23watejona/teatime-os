@@ -1,17 +1,12 @@
 #ifndef TIMER_H
 #define TIMER_H
 
+#define CPU_MHZ 80
+#define TICKS_PER_SEC 1000
+#define TICK_CYCLES (CPU_MHZ * 1000000 / TICKS_PER_SEC)
+
 int init_cpu_clk(unsigned int clk_rate_mhz);
 void init_cpu_timer(void);
-
-static inline unsigned int ccount(void) {
-    unsigned int c;
-    asm volatile("rsr.ccount %0" : "=r"(c));
-    return c;
-}
-
-#define TICK_CYCLES 80000 /* 1 ms at 80 MHz */
-#define TICKS_PER_SEC 1000
 
 /* seconds since boot */
 extern volatile unsigned int clktime;
@@ -42,6 +37,7 @@ struct frc1_t {
 };
 
 extern volatile struct frc1_t frc1;
+
 
 _Static_assert(sizeof(struct frc1_t) == 16, "sizeof(struct frc1_t) != 16");
 

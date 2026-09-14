@@ -1,5 +1,3 @@
-#include "wifi_sta.h"
-#include "timer.h"
 #include "def.h"
 #include "reg_util.h"
 #include "wifi_dma.h"
@@ -11,9 +9,8 @@
 #define MAC_DMA_RX_HEAD     0x3ff20008
 #define MAC_DMA_RX_CURRENT  0x3ff2001c
 
-/* Channel dwell: ~400 ms at 80 MHz, a few beacon intervals. */
-#define CHAN_DWELL_CYCLES   32000000u
-#define SERVICER_TICK (TICKS_PER_SEC / 10) /* station and channel timers */
+#define CHAN_DWELL (4 * TICKS_PER_SEC / 10) // a few 100 ms beacon intervals, so a dwell hears every ap on the channel
+#define SERVICER_TICK (TICKS_PER_SEC / 10)
 
 #define STAGE_SLOTS 4
 
@@ -113,7 +110,7 @@ void wifi_rx_init(void) {
 void wifi_rx_servicer(void) {
     unsigned int ch = 1;
     int locked_now = 0;
-    unsigned int last = ccount();
+    unsigned int last = ticks();
     while (1) {
         while (stage_tail != stage_head) {
             struct rx_stage *s = &stage[stage_tail & (STAGE_SLOTS - 1)];
@@ -129,10 +126,10 @@ void wifi_rx_servicer(void) {
             }
         } else {
             locked_now = 0;
-            if (ccount() - last >= CHAN_DWELL_CYCLES) {
+            if (ticks() - last >= CHAN_DWELL) {
                 ch = (ch >= 13) ? 1 : ch + 1;
                 wifi_set_channel(ch);
-                last = ccount();
+                last = ticks();
             }
         }
 

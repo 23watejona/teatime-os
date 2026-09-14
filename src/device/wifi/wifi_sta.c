@@ -1,4 +1,5 @@
 #include "timer.h"
+#include "proc.h"
 #include "reg_util.h"
 #include "uart.h"
 #include "string.h"
@@ -12,9 +13,9 @@ extern int wifi_locked_channel;
 extern unsigned char wifi_mac_addr[6];
 extern volatile int wifi_target_channel;
 
-#define RETRY_PERIOD   24000000u /* ~300 ms at 80 MHz */
-#define BEACON_LOSS    400000000u /* ~5 s without a frame from the AP */
-#define WPA_STALL      800000000u /* ~10 s associated but 4-way incomplete */
+#define RETRY_PERIOD (3 * TICKS_PER_SEC / 10)
+#define BEACON_LOSS (5 * TICKS_PER_SEC)
+#define WPA_STALL (10 * TICKS_PER_SEC)
 
 extern unsigned char ap_bssid[6];
 const char ap_ssid[] = AP_SSID;
@@ -37,7 +38,7 @@ static void link_down(int rescan) {
         wifi_sta_state = STA_INIT;
     } else {
         wifi_sta_state = STA_AUTH;
-        last_tx = ccount() - RETRY_PERIOD;
+        last_tx = ticks() - RETRY_PERIOD;
     }
 }
 
@@ -115,7 +116,7 @@ static void send_assoc(void) {
 }
 
 void wifi_station_tick(void) {
-    unsigned int now = ccount();
+    unsigned int now = ticks();
 
     switch (wifi_sta_state) {
     case STA_INIT:
@@ -180,7 +181,7 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
         if (f[10 + i] != ap_bssid[i])
             a2_ours = 0;
     if (a2_ours)
-        last_heard = ccount();
+        last_heard = ticks();
 
     unsigned int fc0 = f[0];
     if (((fc0 >> 2) & 3) != 0)
@@ -210,7 +211,7 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
         }
         if (wifi_sta_state == STA_AUTH) {
             wifi_sta_state = STA_ASSOC;
-            last_tx = ccount() - RETRY_PERIOD;
+            last_tx = ticks() - RETRY_PERIOD;
             kprintf_uart("sta: authenticated, associating\n");
         }
     } else if (subtype == 1) {
@@ -223,7 +224,8 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
         if (wifi_sta_state == STA_ASSOC) {
             wifi_sta_aid = aid;
             wifi_sta_state = STA_RUN;
-            last_heard = run_since = ccount();
+            last_heard = ticks();
+            run_since = last_heard;
             kprintf_uart("sta: ASSOCIATED aid=%u\n", aid);
             wpa_begin();
         }

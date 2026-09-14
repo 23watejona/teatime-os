@@ -1,4 +1,3 @@
-#include "timer.h"
 #include "def.h"
 #include "string.h"
 #include "ipv4.h"
@@ -31,10 +30,9 @@ enum tcp_state {
 #define TCP_WINDOW (2 * TCP_MSS)
 #define RX_RING_SIZE 2048
 
-#define RTO_INITIAL 80000000u /* ~1 s */
-#define RTO_POLL (TICKS_PER_SEC / 10)
-#define CLOSE_TICKS (10 * TICKS_PER_SEC) /* a peer that never answers our FIN */
-#define MAX_RETRIES 5
+#define RTO_INITIAL TICKS_PER_SEC
+#define CLOSE_TICKS (10 * TICKS_PER_SEC) // bounds close() when the peer never answers our fin
+#define MAX_RETRIES 5 // the sleep list compares wake times as signed ints, so RTO_INITIAL << MAX_RETRIES must stay below 2^31
 
 #define SEQ_LT(a, b) ((int)((a) - (b)) < 0)
 #define SEQ_LEQ(a, b) ((int)((a) - (b)) <= 0)
@@ -67,8 +65,7 @@ static struct {
     const u8 *tx_data;
     unsigned int tx_len;
     unsigned int retries;
-    unsigned int last_send;
-    unsigned int rto_cycles;
+    unsigned int rto;
     int sender;
     int send_err;
     unsigned int rx_head;
@@ -80,6 +77,7 @@ static struct {
 static u8 rx_ring[RX_RING_SIZE];
 
 static int tcp_ctrl_mutex;
+static int rto_cond;
 
 // send_ipv4_raw prepends the ipv4 and snap headers in place
 static u8 tx_buf[sizeof(struct tcp_header) + OPT_MSS_LEN + TCP_MSS + 28] __attribute__((aligned(4)));
@@ -145,7 +143,6 @@ static void send_unacked(void) {
     unsigned int acked = outstanding < tcp_ctrl.tx_len ? tcp_ctrl.tx_len - outstanding : 0;
     send(tcp_ctrl.snd_una, tcp_ctrl.tx_flags, tcp_ctrl.tx_data + acked,
          tcp_ctrl.tx_len - acked);
-    tcp_ctrl.last_send = ccount();
 }
 
 static void send_new(u8 flags, const u8 *data, unsigned int len) {
@@ -153,8 +150,10 @@ static void send_new(u8 flags, const u8 *data, unsigned int len) {
     tcp_ctrl.tx_data = data;
     tcp_ctrl.tx_len = len;
     tcp_ctrl.retries = 0;
-    tcp_ctrl.rto_cycles = RTO_INITIAL;
+    tcp_ctrl.rto = RTO_INITIAL;
     send_unacked();
+    // the timer process is parked with nothing outstanding, so wake it to start the rto countdown
+    cond_signal(rto_cond);
 }
 
 static void disconnect(void) {
@@ -244,6 +243,7 @@ static void recv(struct ipv4_addr src, u8 *seg, unsigned int len) {
         && SEQ_LEQ(ack, tcp_ctrl.snd_nxt)) {
         tcp_ctrl.snd_una = ack;
         if (tcp_ctrl.snd_una == tcp_ctrl.snd_nxt) {
+            cond_signal(rto_cond);
             if (tcp_ctrl.sender) {
                 tcp_ctrl.sender = 0;
                 tcp_ctrl.send_err = 0;
@@ -417,28 +417,26 @@ static const struct dev_ops tcp_ops = {
 
 void tcp_init(void) {
     tcp_ctrl_mutex = mutex_create();
+    rto_cond = cond_create();
     listener.dev = dev_register("tcp", &tcp_ops, NULL);
     tcp_ctrl.dev = dev_register("tcpconn", &tcp_conn_ops, NULL);
 }
 
-static void tcp_tick(void) {
+void tcp_timer_proc(void) {
     mutex_lock(tcp_ctrl_mutex);
-    if (tcp_ctrl.snd_una != tcp_ctrl.snd_nxt
-        && ccount() - tcp_ctrl.last_send >= tcp_ctrl.rto_cycles) {
+    while (1) {
+        if (tcp_ctrl.snd_una == tcp_ctrl.snd_nxt) {
+            cond_wait(rto_cond, tcp_ctrl_mutex);
+            continue;
+        }
+        if (cond_timedwait(rto_cond, tcp_ctrl_mutex, tcp_ctrl.rto) == 0)
+            continue;
         if (tcp_ctrl.retries >= MAX_RETRIES) {
             disconnect();
         } else {
             tcp_ctrl.retries += 1;
-            tcp_ctrl.rto_cycles <<= 1;
+            tcp_ctrl.rto <<= 1;
             send_unacked();
         }
-    }
-    mutex_unlock(tcp_ctrl_mutex);
-}
-
-void tcp_timer_proc(void) {
-    while (1) {
-        sleep(RTO_POLL);
-        tcp_tick();
     }
 }

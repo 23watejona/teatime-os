@@ -10,11 +10,11 @@ struct sleeper {
 
 static struct sleeper sleepers[NUM_PROC];
 static struct sleeper *sleep_list;
-static unsigned int ticks;
+static unsigned int tick_count;
 
 IRAM_ATTR void sleep_enqueue(int pid, unsigned int delay) {
     struct sleeper *e = &sleepers[pid];
-    e->wake_at = ticks + delay;
+    e->wake_at = tick_count + delay;
     struct sleeper **p = &sleep_list;
     while (*p && (int)((*p)->wake_at - e->wake_at) <= 0)
         p = &(*p)->next;
@@ -41,9 +41,13 @@ IRAM_ATTR void sleep(unsigned int delay) {
     enable(m);
 }
 
+unsigned int ticks(void) {
+    return tick_count;
+}
+
 IRAM_ATTR void sleep_clock(void) {
-    ticks++;
-    while (sleep_list && (int)(sleep_list->wake_at - ticks) <= 0) {
+    tick_count++;
+    while (sleep_list && (int)(sleep_list->wake_at - tick_count) <= 0) {
         struct sleeper *e = sleep_list;
         sleep_list = e->next;
         e->next = NULL;

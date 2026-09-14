@@ -39,5 +39,5 @@ void init_wifi_clk(void) {
     rtc.analog_0 = 0;
     rtc.sleep_state = 0;
 
-    init_cpu_clk(80);
+    init_cpu_clk(CPU_MHZ);
 }
