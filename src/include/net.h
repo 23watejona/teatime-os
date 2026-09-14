@@ -15,6 +15,5 @@ int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len);
 /* To a known link address, no resolution. pkt needs 8 bytes of headroom. */
 int net_tx(const unsigned char *mac, unsigned char *pkt, unsigned int len);
 
-int net_tx_llc(const unsigned char *mac, unsigned char *llc, unsigned int len);
 
 #endif

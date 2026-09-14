@@ -57,26 +57,19 @@ static const u8 rsn_ie[] = {
     0x00, 0x00,
 };
 
-static int pmk_ready;
-
 void wpa_prep(void) {
-    if (pmk_ready)
-        return;
     wpa2_pmk(passphrase, (const u8 *)ap_ssid, strlen(ap_ssid), pmk);
-    pmk_ready = 1;
     kprintf_uart("wpa: PMK ready\n");
 }
 
 void wpa_begin(void) {
     if (wpa_state != WPA_IDLE)
         return;
-    wpa_prep();
     rng_fill(snonce, 32);
     wpa_state = WPA_WAIT_M1;
     kprintf_uart("wpa: armed, waiting for EAPOL msg1\n");
 }
 
-/* PTK = PRF-384 over the address/nonce pair in canonical (min||max) order. */
 static void derive_ptk(void) {
     u8 data[76];
     const u8 *a = ap_bssid, *b = wifi_mac_addr;
@@ -132,7 +125,7 @@ static void send_eapol(unsigned int keyinfo, const u8 *nonce,
     n += 99 + kdlen;
     // before WPA_DONE no key is installed so the 4-way goes out in the clear, but a group-rekey reply must ride the encrypted link like any other data
     if (wpa_state == WPA_DONE)
-        net_tx_llc(ap_bssid, f + 24, n - 24);
+        wifi_ccmp_tx(ap_bssid, f + 24, n - 24);
     else
         wifi_tx_frame(f, n);
 }

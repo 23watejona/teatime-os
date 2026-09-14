@@ -27,10 +27,6 @@ static void write_key(unsigned int slot, unsigned int flagword, const u8 *key) {
     WRITE_REG(KEY_ENABLE, READ_REG(KEY_ENABLE) | (1u << slot));
 }
 
-/* 48-bit CCMP packet number for the pairwise TK. Must strictly increase per
-   MPDU under one key or the AP discards frames as replays; starts at 1. */
-static unsigned int pn_lo = 1, pn_hi;
-
 void wifi_ccmp_install_keys(void) {
     // the slot number, not the flag word, picks the key class: group frames draw from slots 2-5 matched on a2=bssid and unicast from 6-7, so swapping them makes the hw decrypt group frames with the pairwise key
     write_key(2, 0x004c0000u | ((wpa_gtk_id & 1) << 24), wpa_gtk);
@@ -38,9 +34,6 @@ void wifi_ccmp_install_keys(void) {
 
     WRITE_REG(0x3ff20800, CCMP_ENGINE);
 
-    /* A fresh TK starts a fresh PN space. */
-    pn_lo = 1;
-    pn_hi = 0;
     kprintf_uart("ccmp: keys installed (enable=%x eng=%x)\n",
                  READ_REG(KEY_ENABLE), READ_REG(0x3ff20800));
 }
@@ -53,34 +46,28 @@ void wifi_ccmp_clear_keys(void) {
     WRITE_REG(KEY_ENABLE, READ_REG(KEY_ENABLE) & ~((1u << 2) | (1u << 6)));
 }
 
-static unsigned int tx_seq;
+struct ccmp_frame {
+    struct mac_header mac;
+    struct ccmp_header ccmp;
+    unsigned char body[];
+} __attribute__((packed));
 
-/* Build and transmit a CCMP data frame carrying `payload` to `da`. The MAC
-   encrypts the payload and appends the MIC in hardware. */
 int wifi_ccmp_tx(const unsigned char *da, const unsigned char *payload, unsigned int len) {
     u8 f[1600];
-    if (32 + len + 8 > sizeof(f))
+    struct ccmp_frame *frame = (struct ccmp_frame *)f;
+    unsigned int frame_len = sizeof(*frame) + len + CCMP_MIC_LEN;
+    if (frame_len > sizeof(f))
         return -1;
 
-    f[0] = 0x08; f[1] = 0x41; /* Protected + ToDS */
-    f[2] = 0x00; f[3] = 0x00;
-    memcpy(f + 4, ap_bssid, 6);
-    memcpy(f + 10, wifi_mac_addr, 6);
-    memcpy(f + 16, da, 6);
-    /* Distinct seq per frame, or the AP drops repeats as duplicate retransmits. */
-    f[22] = (tx_seq << 4) & 0xf0;
-    f[23] = (tx_seq >> 4) & 0xff;
-    tx_seq = (tx_seq + 1) & 0xfff;
-
-    /* Hand the MAC plaintext — it encrypts in place, so a pre-encrypted payload
-       comes out double-processed and the AP drops it. */
-    f[24] = pn_lo;        f[25] = pn_lo >> 8;  f[26] = 0x00; f[27] = 0x20;
-    f[28] = pn_lo >> 16;  f[29] = pn_lo >> 24; f[30] = pn_hi; f[31] = pn_hi >> 8;
-    memcpy(f + 32, payload, len);
-    memset(f + 32 + len, 0, 8); /* MIC space; HW fills it */
-    if (++pn_lo == 0)
-        pn_hi++;
-    return wifi_tx_frame(f, 32 + len + 8);
+    memset(frame, 0, sizeof(*frame));
+    frame->mac.frame_control[0] = FC_DATA;
+    frame->mac.frame_control[1] = FC_PROTECTED | FC_TO_DS;
+    memcpy(frame->mac.addr1, ap_bssid, 6);
+    memcpy(frame->mac.addr2, wifi_mac_addr, 6);
+    memcpy(frame->mac.addr3, da, 6);
+    memcpy(frame->body, payload, len);
+    memset(frame->body + len, 0, CCMP_MIC_LEN); // the mac writes the mic, so only the space is reserved
+    return wifi_tx_frame(f, frame_len);
 }
 
 int wifi_ccmp_rx(volatile unsigned char *buf, unsigned int len, unsigned char *out) {

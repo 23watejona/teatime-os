@@ -1,9 +1,8 @@
 #ifndef WIFI_WPA_H
 #define WIFI_WPA_H
 
-/* Derives the PMK (PBKDF2, 4096 iterations — blocks for seconds). Call before
-   association so the derivation cannot stall the RX path while EAPOL msg1 is in
-   flight. Idempotent. */
+/* Derives the PMK (PBKDF2, 4096 iterations: seconds of CPU). Called once at
+   boot, before the watchdog and the servicer exist. */
 void wpa_prep(void);
 
 /* Generates the SNonce and arms EAPOL handling; call once on association. */

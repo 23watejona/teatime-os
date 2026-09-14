@@ -1,6 +1,7 @@
 #include "timer.h"
 #include "reg_util.h"
 #include "uart.h"
+#include "string.h"
 #include "wifi_tx.h"
 #include "wifi_sta.h"
 #include "wifi_wpa.h"
@@ -22,7 +23,6 @@ volatile int wifi_sta_state;
 volatile unsigned int wifi_sta_aid;
 
 static unsigned int last_tx;
-static unsigned int seq;
 static unsigned int last_heard;
 static unsigned int run_since;
 
@@ -69,17 +69,13 @@ static void program_rx_filter(void) {
 }
 
 static unsigned int put_mgmt_hdr(unsigned char *b, unsigned int subtype) {
-    unsigned int n = 0;
-    b[n++] = (subtype << 4);
-    b[n++] = 0x00;
-    b[n++] = 0x00; b[n++] = 0x00; /* duration */
-    for (int i = 0; i < 6; i++) b[n++] = ap_bssid[i]; /* addr1 DA */
-    for (int i = 0; i < 6; i++) b[n++] = wifi_mac_addr[i]; /* addr2 SA */
-    for (int i = 0; i < 6; i++) b[n++] = ap_bssid[i]; /* addr3 BSSID */
-    b[n++] = (seq << 4) & 0xf0;
-    b[n++] = (seq >> 4) & 0xff;
-    seq = (seq + 1) & 0xfff;
-    return n;
+    struct mac_header *mac = (struct mac_header *)b;
+    memset(mac, 0, sizeof(*mac));
+    mac->frame_control[0] = subtype << 4;
+    memcpy(mac->addr1, ap_bssid, 6);
+    memcpy(mac->addr2, wifi_mac_addr, 6);
+    memcpy(mac->addr3, ap_bssid, 6);
+    return sizeof(*mac);
 }
 
 static void send_auth(void) {
@@ -128,7 +124,6 @@ void wifi_station_tick(void) {
         wifi_locked_channel = wifi_target_channel;
         program_rx_filter();
         kprintf_uart("sta: locking channel %d\n", wifi_locked_channel);
-        wpa_prep(); /* slow PBKDF2 now, before msg1 is in flight */
         wifi_sta_state = STA_AUTH;
         last_tx = now - RETRY_PERIOD;
         return;

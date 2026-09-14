@@ -12,6 +12,8 @@
 #include "timer.h"
 #include "intr.h"
 #include "wifi.h"
+#include "wifi_tx.h"
+#include "wifi_wpa.h"
 #include "dev.h"
 #include "gpio.h"
 
@@ -93,6 +95,7 @@ IRAM_ATTR void start ( void )
     sem_init();
     cond_init();
     wifi_rx_init();
+    wifi_tx_init();
     dev_init();
     net_init();
     ipv4_init();
@@ -100,8 +103,10 @@ IRAM_ATTR void start ( void )
     tcp_init();
     make_avail(NULL_PROC);
 
-    
-    // boot safe window: WDT-protected reflash interval before risky RF init
+    wifi_secrets_init();
+    wpa_prep();
+
+    // rf init can wedge the chip past reflashing, so give esptool a window first
     wdt_enable();
     kprintf_uart("\n=== SAFE WINDOW 5s: flash/recover now ===\n");
     for (int s = 5; s > 0; --s) {
@@ -130,7 +135,6 @@ IRAM_ATTR void start ( void )
     WRITE_REG(0x60001220, 0);
 
     wdt_feed();
-    wifi_secrets_init();
     kprintf_uart("wifi: clk\n");
     init_wifi_clk();
     kprintf_uart("wifi: pbus\n");

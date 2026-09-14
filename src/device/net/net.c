@@ -31,7 +31,6 @@ extern struct ipv4_addr net_mask;
 static const u8 bcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 static int arp_cond;
-static int tx_mutex;
 static int arp_cache_mutex;
 
 #define ARP_CACHE_SIZE 4
@@ -59,17 +58,7 @@ struct arp_pkt {
 
 void net_init(void) {
     arp_cond = cond_create();
-    tx_mutex = mutex_create();
     arp_cache_mutex = mutex_create();
-}
-
-/* One frame at a time: the CCMP PN is bumped per frame and must reach the air
-   in that order, or the AP drops the lower PN as a replay. */
-int net_tx_llc(const unsigned char *mac, unsigned char *llc, unsigned int len) {
-    mutex_lock(tx_mutex);
-    int rc = wifi_ccmp_tx(mac, llc, len);
-    mutex_unlock(tx_mutex);
-    return rc;
 }
 
 static void arp_cache_store(struct ipv4_addr ip, const u8 *mac) {
@@ -106,7 +95,7 @@ static void put_snap(u8 *b, unsigned int ethertype) {
 
 int net_tx(const unsigned char *mac, unsigned char *pkt, unsigned int len) {
     put_snap(pkt - LLC_SNAP_LEN, ETHERTYPE_IPV4);
-    return net_tx_llc(mac, pkt - LLC_SNAP_LEN, len + LLC_SNAP_LEN);
+    return wifi_ccmp_tx(mac, pkt - LLC_SNAP_LEN, len + LLC_SNAP_LEN);
 }
 
 static void send_arp_request(struct ipv4_addr target_ip) {
@@ -122,7 +111,7 @@ static void send_arp_request(struct ipv4_addr target_ip) {
     a->sender_ip = local_ip;
     memset(a->target_mac, 0, 6);
     a->target_ip = target_ip;
-    net_tx_llc(bcast, p, sizeof(p));
+    wifi_ccmp_tx(bcast, p, sizeof(p));
 }
 
 static void arp_recv(u8 *payload, unsigned int len) {
@@ -140,7 +129,7 @@ static void arp_recv(u8 *payload, unsigned int len) {
         memcpy(a->sender_mac, wifi_mac_addr, 6);
         a->sender_ip = local_ip;
         put_snap(payload - LLC_SNAP_LEN, ETHERTYPE_ARP);
-        net_tx_llc(req_mac, payload - LLC_SNAP_LEN,
+        wifi_ccmp_tx(req_mac, payload - LLC_SNAP_LEN,
                    LLC_SNAP_LEN + sizeof(struct arp_pkt));
     }
 }
@@ -195,5 +184,5 @@ int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len) {
             tries++;
     }
     mutex_unlock(arp_cache_mutex);
-    return net_tx_llc(mac, pkt, len + LLC_SNAP_LEN);
+    return wifi_ccmp_tx(mac, pkt, len + LLC_SNAP_LEN);
 }
