@@ -10,6 +10,7 @@ void init_wifi_clk(void) {
 
     rtc.sleep_mask = 0xffffffff;
 
+    // rtc state register low field, the sleep option bit cleared, the power control word, and a sleep target far enough out that no sleep fires during bring-up
     WRITE_REG(0x60000718, (READ_REG(0x60000718) & ~0x3Fu) | 8);
     WRITE_REG_UNMASK(0x600007a8, 0x1);
 

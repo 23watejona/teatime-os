@@ -25,6 +25,7 @@ static void rx_max_gain_analog(void) {
     int g1 = (23 * d + 29) / 207;
     if (g1 > 15) g1 = 15;
 
+    // lna cap in register 4, vga cap in register 7, each with its enable bit; register 5 of block 97 is the rx gain level select
     rf_i2c_write(I2C_RX_GAIN, 0, 4, g0 | 0x40);
     rf_i2c_write(I2C_RX_GAIN, 0, 7, g1 | 0x40);
     rf_i2c_write(97, 1, 5, 0xe0);
@@ -50,19 +51,24 @@ void dpd_bypass(void) {
 
 // rf power-down in dependency order: pbus, cal mode, pll, the mac handshake, wifi clocks, then the rf power domain
 void rf_off(void) {
+    // rx pbus field (bits 20-23) and the bus enable field (bits 26-31) off
     WRITE_REG_RMW(PBUS_CTRL, 0xff0fffff, 0);
     WRITE_REG_RMW(PBUS_CTRL, 0x03ffffff, 0);
+    // cal-mode bit 23 set alone for a microsecond, then both cal bits cleared
     WRITE_REG_RMW(RF_CAL_MODE, 0xfe7fffff, 0x00800000);
     wait_us(1);
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x01800000);
+    // pll block register 3 to its powered-down value
     rf_i2c_write(I2C_RFPLL, 1, 3, 0x01);
     WRITE_REG_UNMASK(MAC_PHY_CTRL, MAC_PHY_RF_UP);
+    // wifi sub-block clock gates off, then all but two of the rf power domain bits
     WRITE_REG_UNMASK(DPORT_CLK_EN, 0x038f0000);
     rtc.rf_pwr = 0x50000000;
 }
 
 // brings the rx side of the pbus up while the rf stays in cal mode, so the analog can be programmed before it runs
 void rx_pbus_on(void) {
+    // two of the four rx pbus bits and the bus enable field, then the same cal-mode pulse as rf_off
     WRITE_REG_RMW(PBUS_CTRL, 0xff0fffff, 0x00300000);
     WRITE_REG_RMW(PBUS_CTRL, 0x03ffffff, 0xd8000000);
     WRITE_REG_RMW(RF_CAL_MODE, 0xfe7fffff, 0x00800000);
@@ -72,29 +78,32 @@ void rx_pbus_on(void) {
 
 // rf power-up from cold, the reverse of rf_off: clocks and power domains, pll, per-block analog defaults, channel, rx gains, then the mac handshake and a baseband reset
 void wifi_rf_on(void) {
-    // wifi clock source and enables, and the mac's phy interface, before anything analog is touched
+    // baseband pll clock source select (bits 2-3), the wifi clock and the sub-block clock gates
     WRITE_REG_RMW(BBPLL_CTRL, 0xfffffff3, 0x00000004);
     WRITE_REG_MASK(DPORT_CLK_EN, DPORT_WIFI_CLK_EN);
     WRITE_REG_MASK(DPORT_CLK_EN, 0x038f0000);
+    // mac enabled with its low field at maximum, and two tx-queue control bits the mac sets on a tx timeout cleared
     WRITE_REG(MAC_CTRL, 0x80000fff);
     WRITE_REG_UNMASK(0x3ff20c74, 0x00c00000);
 
     WRITE_REG_UNMASK(MAC_PHY_CTRL, MAC_PHY_RF_UP);
 
-    // pll block powered and reset, then every rf power domain on
+    // pll block register 3 to its powered value (rf_off writes the powered-down one) and register 11 to its base value, then every rf power domain on
     rx_pbus_on();
     rf_i2c_write(I2C_RFPLL, 1, 3, 0xf1);
     rf_i2c_write(I2C_RFPLL, 1, 11, 0x80);
 
     rtc.rf_pwr = 0xfe000000;
+    // bbpll sleep configuration cleared, the rtc pll control to its running value, and two rfpll control bits set
     WRITE_REG(0x60000744, 0);
     rtc.pll_ctrl = 0x01000000;
     WRITE_REG_UNMASK(RFPLL_CTRL, 0x00000300);
 
+    // block 101 register 0 to its running value, and bit 0 of the sar block's register 0
     rf_i2c_write(101, 4, 0, 0xc6);
     rf_i2c_write_mask(I2C_SAR, 2, 0, 0, 0, 1);
 
-    // analog block defaults need the pll locked on a channel before the rx gains are derived
+    // all wifi clock gates open; the analog defaults need the pll locked on a channel before the rx gains are derived
     WRITE_REG_MASK(DPORT_CLK_EN, 0xffff0000);
     rtc.rf_pwr = 0xfe000000;
     rf_regs_init();
@@ -110,6 +119,7 @@ void wifi_rf_on(void) {
     WRITE_REG_MASK(BB_RX_CTRL, BB_RX_RESET);
     WRITE_REG_UNMASK(BB_RX_CTRL, BB_RX_RESET);
 
+    // two pll block registers set to their post-lock values
     rf_i2c_write(I2C_RFPLL, 1, 6, 0x08);
     rf_i2c_write(I2C_RFPLL, 1, 9, 0x10);
 
@@ -124,6 +134,7 @@ void wifi_rf_on(void) {
 
 // measures the on-chip rc time constant and writes matching filter trims, so the baseband filter corners land on their design bandwidth despite process spread
 void rc_calibrate(void) {
+    // the measurement runs in block 106 with block 104 powered for it: setup fields first, then bit 3 of register 4 pulsed as the start
     kprintf_uart("      rc:w1\n");
     rf_i2c_write_mask(106, 2, 0, 5, 4, 0);
     rf_i2c_write_mask(106, 2, 4, 7, 4, 1);
@@ -136,11 +147,13 @@ void rc_calibrate(void) {
     kprintf_uart("      rc:wait\n");
     wait_us(100);
 
+    // the six-bit count is the measured time constant; block 104 is powered down again once it is read
     kprintf_uart("      rc:read\n");
     unsigned int v = rf_i2c_read(106, 2, 5) & 0x3f;
     rf_i2c_write_mask(104, 3, 1, 0, 0, 0);
     kprintf_uart("      rc:done\n");
 
+    // two linear fits map the count to the filter trims of blocks 97 and 102, each written with its enable bit
     int rc_a = (16 * (int)v - 39) / 30;
     int rc_b = (28 * v / 9 + 2) >> 2;
 
@@ -150,6 +163,7 @@ void rc_calibrate(void) {
 
 // the sar adc measures tx dc offset and power, so it comes up with the rf
 static void sar_init(void) {
+    // sar power domain, then the block's enable bit and a two-bit mode field
     rtc.rf_pwr |= 0x02000000;
     rf_i2c_write_mask(I2C_SAR, 2, 0, 4, 4, 1);
     rf_i2c_write_mask(I2C_SAR, 2, 1, 1, 0, 2);
@@ -172,15 +186,18 @@ static void tx_regs_init(void) {
 
 // bias, tx chain, rx gain, sar and pll defaults for every analog block, in the order the blocks depend on each other
 void rf_regs_init(void) {
+    // register 0 of block 106 goes to 37 first and 41 after the other blocks are set; the intermediate value is deliberate
     rf_i2c_write(106, 2, 0, 37);
     tx_regs_init();
     rf_i2c_write(I2C_TX, 2, 1, 72);
+    // rx gain block register 5 low field, block 97 register 8, and the sar block's register 0 before it is powered
     rf_i2c_write_mask(I2C_RX_GAIN, 0, 5, 1, 0, 3);
     rf_i2c_write(97, 1, 8, 17);
     rf_i2c_write(I2C_SAR, 2, 0, 21);
     sar_init();
     rf_i2c_write_mask(103, 4, 4, 7, 7, 1);
     rf_i2c_write(106, 2, 0, 41);
+    // pll block registers 4 and 11 to their running values, then bbpll control bits 9-10
     rf_i2c_write(I2C_RFPLL, 1, 4, 175);
     rf_i2c_write(I2C_RFPLL, 1, 11, 128);
     WRITE_REG_RMW(BBPLL_CTRL, 0xfffff9ff, 0x400);
@@ -201,6 +218,7 @@ void pbus_force(unsigned int reg, unsigned int width, unsigned int val) {
 
 // tx gains to their floor, so the rx side can be calibrated without the transmitter leaking into it
 void pbus_tx_power_off(void) {
+    // registers 6 and 1 are the two tx gain stages (both go to full on tx enable), and bit 0 of register 2 is the tx path enable, cleared with bit 7 kept
     pbus_force(6, 1, 0);
     pbus_force(1, 1, 12);
     pbus_force(2, 1, 128);
@@ -217,7 +235,7 @@ static void tx_bb_atten_max(void) {
 
 void tx_rf_enable(void) {
     rf_i2c_write_mask(I2C_BB, 0, 28, 6, 6, 1); // tx bb clock
-    rf_i2c_write_mask(124, 1, 21, 0, 0, 1);
+    rf_i2c_write_mask(124, 1, 21, 0, 0, 1); // tx path enable in the second block that gates it
     rf_i2c_write_mask(I2C_BB, 0, 9, 7, 0, 0); // overflow trim, not the drive level
     tx_bb_atten_max();
 }
@@ -270,14 +288,14 @@ void rx_max_gain_digital(unsigned int ch, int level) {
 void rf_init(void) {
     WRITE_REG_MASK(DPORT_CLK_EN, 0xffff0000);
 
-    // rtc pll timing and the first rf power domains, with the rf held in cal mode
+    // rtc pll timing word, then the top four rf power domains with the cal-mode bits cleared, then the sar adc domain (bit 25)
     rtc.pll_ctrl = 0x0019c06a;
     rtc.rf_pwr = 0xf0000000;
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x01800000);
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x08000000);
     rtc.rf_pwr |= 0x02000000;
 
-    // pbus timing before the last domains, so the bus is stable when the analog blocks wake
+    // the next two domains (bits 28-29) need the pbus status and config timing fields set before the last two (bits 26-27) come up, or the analog blocks wake on an unstable bus
     rtc.rf_pwr |= 0x30000000;
     WRITE_REG_RMW(PBUS_STATUS, 0xe0ffffff, 0x1c000000);
     WRITE_REG_RMW(PBUS_CFG, 0xcfffffff, 0x10000000);
@@ -285,16 +303,18 @@ void rf_init(void) {
     wait_us(2);
     rtc.rf_pwr |= 0x0c000000;
 
-    // tx path enabled but at zero gain for the rest of bring-up
+    // bit 0 of pbus register 2 is the tx path enable, so tx is on but pbus_tx_power_off keeps its gains at zero for the rest of bring-up
     pbus_debug_mode();
     pbus_force(2, 1, 129);
     pbus_tx_power_off();
     pbus_work_mode();
 
+    // pll block control register to its running value before the first channel lock
     rf_i2c_write(I2C_RFPLL, 1, 0, 40);
     wifi_set_channel(1);
     rx_analog_init();
     rf_regs_init();
+    // baseband block register 26 stepped from 8 to 56 rather than written once, so its internal state machine sees the transition
     rf_i2c_write(I2C_BB, 0, 26, 8);
     rf_i2c_write(I2C_BB, 0, 26, 56);
 }
@@ -336,12 +356,14 @@ static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
     int code_i = 64, code_q = 64;
     int step = 28;
 
+    // pbus register 0 is the tx rf gain under test; the width-2 entries of registers 0 and 1 carry the i and q dc codes
     pbus_force(0, 1, gain);
 
     for (unsigned int n = 0; n < DC_CAL_SAMPLES; n++) {
         pbus_force(1, 2, code_q);
         pbus_force(0, 2, code_i);
 
+        // the cal engine is armed then triggered by its low two bits, with the same measurement config above them
         WRITE_REG(MCAL_REG, MCAL_ARM);
         WRITE_REG(MCAL_REG, MCAL_TRIGGER);
         wait_us(2);
@@ -372,6 +394,7 @@ static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
     acc_q = (acc_q + 2) >> 2;
     acc_i = (acc_i + 2) >> 2;
 
+    // averaged codes applied, gain register 1 back to full, engine stopped
     pbus_force(1, 2, acc_q);
     pbus_force(0, 2, acc_i);
     pbus_force(1, 1, 127);
@@ -397,6 +420,7 @@ static void tx_dc_offset_calibrate(void) {
     static const unsigned char gain_tbl[4] = {0x04, 0x10, 0x12, 0x14};
     signed char pairs[4][2];
 
+    // gain register 1 to a mid value for the search, so the residual stays inside the engine's range
     pbus_debug_mode();
     pbus_force(1, 1, 31);
 
@@ -442,6 +466,7 @@ static int noise_floor_clamped(void) {
 static void noise_floor_start(unsigned int ch3) {
     if (READ_REG(BB_RX_CTRL) & BB_NOISE_MEAS)
         return;
+    // channel index in bits 9-11 over a fixed low field, then the measure bit with two companion bits above it
     WRITE_REG_RMW(BB_NOISE_FLOOR, 0xfffff000, ((ch3 & 7) << 9) | 0x1a0);
     WRITE_REG_MASK(BB_RX_CTRL, 0x00028002);
 }
@@ -469,6 +494,7 @@ static int noise_floor_measure(unsigned int chan) {
 
 // measures the noise floor four times on channel 1 with the rx loop forced open and keeps the lowest, so the cca threshold sits just above the real floor of this board
 static void noise_init(void) {
+    // a provisional floor, and the rx gain forced to a fixed lna/vga setting so every sample is taken at the same gain
     noise_floor_set(-388);
     WRITE_REG_RMW(BB_RX_GAIN_FORCE, 0xfffffc00, 201);
     WRITE_REG_UNMASK(BB_RX_GAIN_FORCE, BB_RX_GAIN_LATCH);
@@ -479,6 +505,7 @@ static void noise_init(void) {
     unsigned int saved_d20 = READ_REG(0x60009d20);
     unsigned int saved_d40 = READ_REG(0x60009d40);
 
+    // digital rx bit 0 and one rx mode bit cleared for the measurement, restored after
     WRITE_REG_UNMASK(BB_DIG_RX, 1);
     WRITE_REG_UNMASK(0x60009d20, 0x40000000);
     wifi_set_channel(1);
@@ -516,6 +543,7 @@ int live_rssi(void) {
 
 // baseband bring-up in the order the steps depend on each other: pbus, rc cal, tx dc cal, rx baseband config, noise floor, then predistortion bypassed
 void bb_bringup(void) {
+    // block 97 register 7 to its running value, the pbus timing, then the baseband block's clock enable
     rf_i2c_write(97, 1, 7, 81);
     init_wifi_pbus();
     rf_i2c_write_mask(I2C_BB, 0, 16, 0, 0, 1);
@@ -534,6 +562,7 @@ void bb_bringup(void) {
 
 void antenna_switch_init(void) {
     // left at reset the antenna switch never keys to tx, so the patterns are set here
+    // one byte per antenna state across the two pattern words, plus an enable bit in the agc register and a field in the sleep register
     WRITE_REG(BB_ANT_SWITCH_LO, 0x01010101);
     WRITE_REG(BB_ANT_SWITCH_HI, 0x04010101);
     WRITE_REG_MASK(BB_AGC_CTRL, 0x00800000);
@@ -545,6 +574,7 @@ void antenna_switch_init(void) {
 void bbpll_calibrate(unsigned int slow) {
     unsigned int saved = READ_REG(DPORT_CTL_REG);
     WRITE_REG(DPORT_CTL_REG, saved & ~DPORT_CTL_DOUBLE_CLK);
+    // bits 2-3 switched from 1 to 2 and back, which is what makes the pll relock
     wait_us(1);
     WRITE_REG_RMW(BBPLL_CTRL, 0xfffffff3, 8);
     wait_us(slow ? 1000 : 100);
@@ -577,6 +607,7 @@ void agc_disable(void) {
 }
 
 void rx_clock_enable(unsigned int en) {
+    // rx bb clock sits next to the tx one in register 28, and its path enable next to the tx one in block 124
     rf_i2c_write_mask(I2C_BB, 0, 28, 5, 5, en);
     rf_i2c_write_mask(124, 1, 21, 1, 1, en);
 }
@@ -587,6 +618,7 @@ static void powerup_option_set(void) {
 
 // there is no second-stage bootloader to set this analog default, so it is set here or rx evm degrades
 static void analog_reg_default(void) {
+    // analog reset pulsed, then the default word chosen by the chip type bits in the efuse
     WRITE_REG_MASK(0x60000d48, 1);
     WRITE_REG_UNMASK(0x60000d48, 1);
     unsigned int e = READ_REG(EFUSE_DATA2_REG);
@@ -605,7 +637,7 @@ void init_wifi_rf(void) {
     rf_init();
     kprintf_uart("  rf: bb_bringup\n");
     bb_bringup();
-    rf_i2c_write_mask(103, 4, 4, 4, 0, 0x13);
+    rf_i2c_write_mask(103, 4, 4, 4, 0, 0x13); // block 103 register 4 low field to its running value once the baseband is up
     kprintf_uart("  rf: rx_digital_stop\n");
     unsigned int dig = rx_digital_stop();
     kprintf_uart("  rf: bbpll_calibrate\n");

@@ -74,11 +74,12 @@ static void rx_gain_table_load(unsigned int *table, unsigned int count) {
     unsigned int *gain_lo = table;
     unsigned int *gain_hi = table + 0x40;
 
-    // the guard and window writes must precede pbus debug mode
+    // the pll guard bits and the window select for the high half must precede pbus debug mode
     WRITE_REG_MASK(RFPLL_CTRL, 0x00030000);
     WRITE_REG(BB_RX_GAIN_WINDOW, 0x000001e0);
     pbus_debug_mode();
 
+    // register 0x12 and bit 5 of register 0x18 in the baseband block are parked at zero during the load and restored after
     unsigned int saved_12 = rf_i2c_read_mask(I2C_BB, 0, 0x12, 7, 0);
     unsigned int saved_18 = rf_i2c_read_mask(I2C_BB, 0, 0x18, 5, 5) ? 1u : 0u;
     rf_i2c_write_mask(I2C_BB, 0, 0x18, 5, 5, 0);
@@ -164,6 +165,7 @@ void rx_gain_init(unsigned int rxmax) {
 
     rx_gain_table_load(table, rx_max_gain + 1);
 
+    // register 0x12 to its running value, then the bit that commits the loaded table
     rf_i2c_write(I2C_BB, 0, 0x12, 0xe8);
 
     WRITE_REG_MASK(0x60009860, 1);
@@ -176,6 +178,7 @@ void rx_gain_init(unsigned int rxmax) {
     WRITE_REG_RMW(BB_RX_MAX_GAIN, 0xffffff80, rx_max_gain);
 }
 
+// selects one of three 11b receive filters; 3 is the widest and the one the vendor station runs with
 void rx_filter_select(int sel) {
     WRITE_REG_UNMASK(BB_RX_FILTER, 0x3010);
     if (sel == 1)

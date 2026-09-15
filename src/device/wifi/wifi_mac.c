@@ -9,15 +9,20 @@ extern void rf_off(void);
 
 // mac feature options, the phy interface config, the two mac clock dividers and the mac enable bits
 static void mac_options_init(void) {
+    // rx feature options: which frame classes and errors reach the dma; the individual bits are not decoded
     WRITE_REG_MASK(MAC_RX_OPTION, 0x8084a000);
     WRITE_REG_RMW(MAC_RX_OPTION, 0xffdfbff7, 0);
     WRITE_REG_MASK(MAC_RXTX_OPTION, 0x00000008);
+    // automatic ack on, so the ap sees our replies acknowledged
     WRITE_REG_MASK(MAC_TX_OPTION, 0x00000003);
+    // phy interface mode field cleared to its default
     WRITE_REG_RMW(MAC_PHY_CONF, 0xffffff0f, 0);
+    // the first mac clock field is raised by a fixed step rather than set outright, so it stays relative to its reset value
     unsigned int v = READ_REG(0x3ff20c68);
     WRITE_REG_RMW(0x3ff20c68, 0xff00ffff, (((v >> 16) + 18) & 0xff) << 16);
     WRITE_REG_RMW(0x3ff20c6c, 0xffffff00, 0x16);
     WRITE_REG_RMW(0x3ff20c6c, 0xffff00ff, 0x1600);
+    // a 12-bit low field and the two top enable bits; neither is decoded further
     WRITE_REG_RMW(MAC_CTRL, 0xfffff000, 0x0f0);
     WRITE_REG_MASK(MAC_CTRL, 0x80000000);
     WRITE_REG_MASK(MAC_CTRL, 0x40000000);
@@ -25,6 +30,7 @@ static void mac_options_init(void) {
 
 // two placeholder slots with a broadcast address and an all-ones key, so the crypto engine has valid entries before any real key is installed
 static void key_table_init(void) {
+    // flag word: key type 3, cipher code 6 (none), key id 0 in the first slot and 1 in the second, so both key ids resolve
     WRITE_REG(MAC_KEY_ADDR(0), 0xffffffff);
     WRITE_REG(MAC_KEY_FLAGS(0), 0x00ccffff);
     WRITE_REG(MAC_KEY_MATERIAL(0, 0), 0xffffffff);
@@ -45,17 +51,22 @@ void init_wifi_mac(void) {
     WRITE_REG(MAC_CRYPTO_CIPHER, MAC_CRYPTO_OFF);
     WRITE_REG(MAC_CRYPTO_CONF, MAC_CRYPTO_OFF);
     key_table_init();
+    // third crypto word cleared; its meaning is not known
     WRITE_REG(0x3ff20808, 0);
     init_wifi_dma();
+    // rate index map, one nibble per rate, and two all-ones words behind it
     WRITE_REG(0x3ff20400, 0x76503210);
     WRITE_REG(0x3ff20404, 0xbbbbbbbb);
     WRITE_REG(0x3ff20408, 0xbbbbbbbb);
+    // address filtering on for all three units and the two upper option bits, then the scan-hold and bit 12 cleared, so nothing is locked to a bssid yet
     WRITE_REG_MASK(MAC_RX_FILTER, 0x707);
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00000010);
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00001000);
+    // both bssid units disabled until the station picks an ap
     WRITE_REG_UNMASK(MAC_BSSID_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
     WRITE_REG_UNMASK(MAC_BSSID_MASK_HI(1), MAC_ADDR_MATCH_ENABLE);
     WRITE_REG(MAC_INT_ENABLE, WDEV_INTEREST_EVENT);
+    // set after every mac reset before tx is enabled; the bit is not decoded
     WRITE_REG_MASK(0x3ff20178, 2);
     WRITE_REG_UNMASK(MAC_TX_CTRL, MAC_TX_ENABLE);
 }
@@ -78,35 +89,40 @@ void wifi_mac_rx_enable(void) {
     wait_us(2000);
     wifi_rf_on();
 
-    // promiscuous bits back off but unit 0 left wide open, so beacons from every ap still arrive while the crypto path delivers protected frames
+    // this is the sniffer entry sequence: address filters off, so every frame on the channel reaches the scan
     mac_filter_accept_all();
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00000001);
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00000002);
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00000004);
 
+    // raw delivery of protected frames, crypto pass-through on and the engine off, so encrypted beacons and data are still handed up
     WRITE_REG_MASK(MAC_RX_OPTION, 0x00040000);
     WRITE_REG_MASK(MAC_CRYPTO_CIPHER, 0x03000000);
     WRITE_REG_UNMASK(MAC_CRYPTO_CIPHER, 0x00010000);
     WRITE_REG_MASK(MAC_CRYPTO_CONF, 0x03000000);
     WRITE_REG_UNMASK(MAC_CRYPTO_CONF, 0x00010000);
 
+    // unit 0 masks no address bytes but stays enabled, so it matches everything
     WRITE_REG(MAC_ADDR_MASK_LO(0), 0);
     WRITE_REG(MAC_ADDR_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
     WRITE_REG(MAC_BSSID_MASK_LO(0), 0);
     WRITE_REG(MAC_BSSID_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
 
+    // the two sniffer rx events added to the serviced set, so unfiltered frames raise the fiq
     WRITE_REG(MAC_INT_ENABLE, WDEV_INTEREST_EVENT | WDEV_SNIFFER_EVENT);
 
+    // baseband rx mode bits that the sniffer runs without; the delay lets the rx path settle before acks are turned off
     WRITE_REG_UNMASK(0x60009d44, 0x24000000);
     wait_us(15000);
     WRITE_REG_UNMASK(MAC_TX_OPTION, 0x00000001);
 
     WRITE_REG_MASK(MAC_TX_CTRL, MAC_TX_ENABLE);
 
-    // tx i/q calibration, tx gain per rate slot, sar adc timing and the bbpll trims, so the transmitter radiates; these are the known-working values, none of them has been tuned here
+    // tx i/q calibration registers to fixed values, so no i/q measurement runs before transmitting
     WRITE_REG(0x6000983c, 0x00000012);
     WRITE_REG(0x60009860, 0x02230001);
     WRITE_REG_UNMASK(0x60009864, 0x00000100);
+    // spur protection, rx debug and other baseband words; these are the known-working values, none of them has been tuned here
     WRITE_REG(0x60009884, 0x00018000);
     WRITE_REG(0x6000989c, 0x00018000);
     WRITE_REG(0x600098a0, 0xf1ac6667);
@@ -121,8 +137,10 @@ void wifi_mac_rx_enable(void) {
     WRITE_REG(0x60009c44, 0x00000000);
     WRITE_REG(0x60009d0c, 0x0000000a);
 
+    // one tx gain and attenuation word for every rate slot, so all rates transmit at the same level
     for (unsigned int i = 0; i < RF_TXPWR_REGS; i++)
         WRITE_REG(RF_TXPWR_REG(i), 0x0003e4f3);
+    // the noise-floor start word and its neighbour, then one rfpll control bit
     WRITE_REG(0x600005b0, 0x043a0000);
     WRITE_REG(0x600005b8, 0x00034008);
     WRITE_REG_MASK(RFPLL_CTRL, 0x00000100);
@@ -130,6 +148,7 @@ void wifi_mac_rx_enable(void) {
     WRITE_REG(0x600005fc, 0x000c0b0a);
     rtc.analog_0 = 0x00200000;
     WRITE_REG_UNMASK(BBPLL_CTRL, 0x10000000);
+    // the sar adc's top control bits, its done bits, then its data words; the tx power measurement runs on it
     WRITE_REG_MASK(0x60000d50, 0x80000000);
     WRITE_REG_MASK(0x60000d5c, 0x80000000);
     WRITE_REG(0x60000d60, 0x00000003);

@@ -58,14 +58,15 @@ static void program_rx_filter(void) {
     WRITE_REG_MASK(MAC_ADDR_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
     WRITE_REG_MASK(MAC_BSSID_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
 
-    // in sniffer mode the mac acks nothing and truncates data frames to the header, so the sniffer bits from bring-up are undone here
+    // in sniffer mode the mac acks nothing and truncates data frames to the header, so the sniffer bits from bring-up are undone here: sniffer events off, crypto pass-through off and the engine on
     WRITE_REG_UNMASK(MAC_INT_ENABLE, WDEV_SNIFFER_EVENT);
     WRITE_REG_UNMASK(MAC_CRYPTO_CIPHER, 0x03000000);
     WRITE_REG_MASK(MAC_CRYPTO_CIPHER, 0x00010000);
     WRITE_REG_UNMASK(MAC_CRYPTO_CONF, 0x03000000);
     WRITE_REG_MASK(MAC_CRYPTO_CONF, 0x00010000);
-    // clearing this stops the mac delivering protected frames at all, so it stays set for the life of the association
+    // raw delivery stays on even though the vendor clears it on sniffer exit: with it clear the mac drops every protected frame instead of decrypting, observed on hardware
     WRITE_REG_MASK(MAC_RX_OPTION, 0x00040000);
+    // automatic ack back on, the baseband's normal rx mode bits back, and all three address filters enabled
     WRITE_REG_MASK(MAC_TX_OPTION, 0x00000001);
     WRITE_REG_MASK(0x60009d44, 0x24000000);
     WRITE_REG_MASK(MAC_RX_FILTER, 0x00000007);

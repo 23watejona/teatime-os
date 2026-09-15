@@ -21,12 +21,14 @@
 #define MAC_DMA_RX_HEAD             0x3ff20008
 #define MAC_DMA_RX_CTRL_HEAD        0x3ff2000c
 #define MAC_DMA_RX_CURRENT          0x3ff2001c
+// rx filter: bits 0-2 enable the address-match filters (clear accepts every frame), bit 4 is held while scanning or associated
 #define MAC_RX_FILTER               0x3ff2006c
 #define MAC_DMA_RX_WINDOW_END       0x3ff2007c
 #define MAC_DMA_RX_WINDOW_BASE      0x3ff20080
 #define MAC_DMA_RX_CTRL_WINDOW_END  0x3ff20084
 #define MAC_DMA_RX_CTRL_WINDOW_BASE 0x3ff20088
 
+// crypto config, one register per direction: low byte cipher select, bit 16 engine enable, bits 24-25 pass frames through undecrypted
 #define MAC_CRYPTO_CIPHER    0x3ff20800
 #define MAC_CRYPTO_CONF      0x3ff20804
 #define MAC_CRYPTO_OFF       0x00030000
@@ -36,6 +38,7 @@
 #define MAC_KEY_ADDR(s)      MAC_KEY_SLOT(s)
 #define MAC_KEY_FLAGS(s)     (MAC_KEY_SLOT(s) + 4)
 #define MAC_KEY_MATERIAL(s, w) (MAC_KEY_SLOT(s) + 8 + 4 * (w))
+// key flag word: bits 18-20 key type (3 for a station key), bits 21-23 cipher code (2 = ccmp), bit 24 key id, bit 31 marks a unicast key
 #define MAC_KEY_CCMP         0x004c0000
 #define MAC_KEY_ID_SHIFT     24
 
@@ -61,6 +64,7 @@
 #define MAC_PHY_CTRL         0x3ff20c70
 #define MAC_PHY_RF_UP        0x00000002
 #define MAC_TX_STATUS        0x3ff20c84
+// rx option bit 18 passes protected frames to the dma (sniffer raw delivery, but also needed for decrypted delivery); tx option bit 0 is the automatic ack
 #define MAC_RX_OPTION        0x3ff20c88
 #define MAC_RXTX_OPTION      0x3ff20c90
 #define MAC_TX_OPTION        0x3ff20c94
