@@ -36,7 +36,7 @@ static void rx_analog_init(void) {
     rx_max_gain_analog();
 }
 
-// takes the rx analog out of cal mode and pushes a starting gain through the latch, so the agc begins from a known point
+// the after-init rx enable: cal mode off, then a fixed lna/vga gain pushed through the force register with its latch bit set then cleared, so the agc begins from a known point
 void rx_path_enable(void) {
     WRITE_REG_RMW(RF_CAL_MODE, 0xfe7fffff, 0);
     wait_us(5);
@@ -66,7 +66,7 @@ void rf_off(void) {
     rtc.rf_pwr = 0x50000000;
 }
 
-// brings the rx side of the pbus up while the rf stays in cal mode, so the analog can be programmed before it runs
+// the wake half of the sleep/wake rx pbus switch (rf_off does the sleep half): the rx pbus fields on while the rf stays in cal mode, so the analog can be programmed before it runs
 void rx_pbus_on(void) {
     // two of the four rx pbus bits and the bus enable field, then the same cal-mode pulse as rf_off
     WRITE_REG_RMW(PBUS_CTRL, 0xff0fffff, 0x00300000);
@@ -82,7 +82,7 @@ void wifi_rf_on(void) {
     WRITE_REG_RMW(BBPLL_CTRL, 0xfffffff3, 0x00000004);
     WRITE_REG_MASK(DPORT_CLK_EN, DPORT_WIFI_CLK_EN);
     WRITE_REG_MASK(DPORT_CLK_EN, 0x038f0000);
-    // mac enabled with its low field at maximum, and two tx-queue control bits the mac sets on a tx timeout cleared
+    // mac enabled with its mode field at the active value, and the first of the mac's four sleep-gating fields cleared
     WRITE_REG(MAC_CTRL, 0x80000fff);
     WRITE_REG_UNMASK(0x3ff20c74, 0x00c00000);
 
@@ -94,7 +94,7 @@ void wifi_rf_on(void) {
     rf_i2c_write(I2C_RFPLL, 1, 11, 0x80);
 
     rtc.rf_pwr = 0xfe000000;
-    // bbpll sleep configuration cleared, the rtc pll control to its running value, and two rfpll control bits set
+    // the open-rf-after-sleep sequence: sleep target cleared and the rtc pll control to its running value, then two rfpll control bits set
     WRITE_REG(0x60000744, 0);
     rtc.pll_ctrl = 0x01000000;
     WRITE_REG_UNMASK(RFPLL_CTRL, 0x00000300);
@@ -292,7 +292,7 @@ void rf_init(void) {
     rtc.pll_ctrl = 0x0019c06a;
     rtc.rf_pwr = 0xf0000000;
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x01800000);
-    WRITE_REG_UNMASK(RF_CAL_MODE, 0x08000000);
+    WRITE_REG_UNMASK(RF_CAL_MODE, 0x08000000); // bit 27 is a current-saving option, cleared
     rtc.rf_pwr |= 0x02000000;
 
     // the next two domains (bits 28-29) need the pbus status and config timing fields set before the last two (bits 26-27) come up, or the analog blocks wake on an unstable bus
@@ -612,13 +612,14 @@ void rx_clock_enable(unsigned int en) {
     rf_i2c_write_mask(124, 1, 21, 1, 1, en);
 }
 
+// the power-up option lives in an rtc scratch word that survives deep sleep, so the rf comes up the same way after a wake
 static void powerup_option_set(void) {
     rtc.scratch[3] = 3;
 }
 
 // there is no second-stage bootloader to set this analog default, so it is set here or rx evm degrades
 static void analog_reg_default(void) {
-    // analog reset pulsed, then the default word chosen by the chip type bits in the efuse
+    // bit 0 of the reset register pulsed (bit 1 beside it resets the mac), then the default word chosen by the chip type bits in the efuse
     WRITE_REG_MASK(0x60000d48, 1);
     WRITE_REG_UNMASK(0x60000d48, 1);
     unsigned int e = READ_REG(EFUSE_DATA2_REG);

@@ -74,7 +74,7 @@ static void rx_gain_table_load(unsigned int *table, unsigned int count) {
     unsigned int *gain_lo = table;
     unsigned int *gain_hi = table + 0x40;
 
-    // the pll guard bits and the window select for the high half must precede pbus debug mode
+    // the rfpll's two sleep-hold bits keep its output steady during the load, and they and the window select must precede pbus debug mode
     WRITE_REG_MASK(RFPLL_CTRL, 0x00030000);
     WRITE_REG(BB_RX_GAIN_WINDOW, 0x000001e0);
     pbus_debug_mode();

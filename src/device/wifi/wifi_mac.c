@@ -22,7 +22,7 @@ static void mac_options_init(void) {
     WRITE_REG_RMW(0x3ff20c68, 0xff00ffff, (((v >> 16) + 18) & 0xff) << 16);
     WRITE_REG_RMW(0x3ff20c6c, 0xffffff00, 0x16);
     WRITE_REG_RMW(0x3ff20c6c, 0xffff00ff, 0x1600);
-    // a 12-bit low field and the two top enable bits; neither is decoded further
+    // the low field is the mac mode (this value active, 2 for sleep), bit 30 is dropped for sleep and bit 31 is the mac enable that stays on
     WRITE_REG_RMW(MAC_CTRL, 0xfffff000, 0x0f0);
     WRITE_REG_MASK(MAC_CTRL, 0x80000000);
     WRITE_REG_MASK(MAC_CTRL, 0x40000000);

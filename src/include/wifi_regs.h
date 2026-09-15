@@ -96,6 +96,7 @@
 #define PBUS_BUSY              0x80000000
 #define PBUS_READ_WINDOW       0x600005a4
 
+// rfpll control: bits 20-23 latch the pll while its divider is reprogrammed, bits 16-17 hold its output across sleep
 #define RFPLL_CTRL           0x600005c8
 #define RFPLL_LATCH          0x00f00000
 #define RF_CAL_MODE          0x600005e8
@@ -109,6 +110,7 @@
 #define BB_TX_CAL            0x60009a28
 #define BB_DIG_RX            0x60009a2c
 #define BB_DIG_RX_EN         0x00080000
+// rx gain force: lna code in the low byte, vga code from bit 2, latch in bit 0
 #define BB_RX_GAIN_FORCE     0x60009a34
 #define BB_RX_GAIN_LATCH     0x00000001
 #define BB_RX_GAIN_WINDOW    0x60009a68
@@ -121,6 +123,7 @@
 #define BB_RX_CTRL           0x60009b60
 #define BB_RX_RESET          0x00000001
 #define BB_NOISE_MEAS        0x00000002
+// noise floor: floor value in bits 0-8, channel index in bits 9-11, cca threshold in bits 12-19, measured floor read back from bits 20-31
 #define BB_NOISE_FLOOR       0x60009b64
 #define BB_RX_FILTER         0x60009c04
 #define BB_ANT_SWITCH_LO     0x60009d60

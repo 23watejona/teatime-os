@@ -32,7 +32,7 @@ void init_wifi_bb(void) {
     WRITE_REG_RMW(0x60009d70, 0xffffffc0, 0x11);
     // spur protection high bits
     WRITE_REG_MASK(0x600098a0, 0xc0000000);
-    // noise floor window and initial floor, refined by the measurement in noise_init
+    // cca threshold in bits 12-19, then the noise floor base in bits 0-8 with the channel index above it; noise_init refines the floor
     WRITE_REG_RMW(BB_NOISE_FLOOR, 0xfff00fff, 0x00022000);
     WRITE_REG_RMW(BB_NOISE_FLOOR, 0xfffff000, 0x00000fa6);
     // two threshold words
