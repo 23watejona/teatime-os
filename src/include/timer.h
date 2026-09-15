@@ -42,7 +42,7 @@ extern volatile struct frc1_t frc1;
 _Static_assert(sizeof(struct frc1_t) == 16, "sizeof(struct frc1_t) != 16");
 
 struct rtc_t {
-    unsigned int _res00;
+    unsigned int pll_ctrl;
 
     unsigned int slp_val;
 
@@ -50,7 +50,7 @@ struct rtc_t {
 
     unsigned int pwr;
 
-    unsigned int _res10;
+    unsigned int rf_pwr;
 
     struct {
         unsigned int cause: 4;
