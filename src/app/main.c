@@ -11,11 +11,11 @@ void gpio_test_proc(void);
 
 void main(void)
 {
+    spawn(gpio_test_proc, APP_STK, APP_PRIO);
     spawn(htcpcp_proc, APP_STK, APP_PRIO);
     spawn(dns_test_proc, APP_STK, APP_PRIO);
     spawn(ping_test_proc, APP_STK, APP_PRIO);
     spawn(console_test_proc, APP_STK, APP_PRIO);
-    spawn(gpio_test_proc, APP_STK, APP_PRIO);
     while (1)
         asm("waiti 0");
 }

@@ -19,7 +19,7 @@ struct pot_status {
     int strength;
 };
 
-/* Opens the relay; call once before the rest. */
+/* Opens the pump and solenoid outputs; call once before the rest. */
 void pot_init(void);
 
 /* Unsynchronized: call from one process only. Strength is a percentage of the

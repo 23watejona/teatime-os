@@ -9,25 +9,38 @@ const struct tea pot_teas[POT_TEAS] = {
     { "/peppermint", 300 },
 };
 
-#define RELAY_PIN 5
-#define RELAY_ON 0 /* the module energises on low */
-#define RELAY_OFF 1
+#define PUMP_PIN 5
+#define SOLENOID_PIN 4
+#define LOAD_ON 1 // the MOSFET modules switch on high
+#define LOAD_OFF 0
 
 static int state = POT_IDLE;
 static int brewing;
 static unsigned int started;
-static int relay = -1;
+static int pump = -1;
+static int solenoid = -1;
 
-static void relay_set(unsigned char level) {
-    if (relay >= 0)
-        write(relay, &level, 1);
+static int load_open(int pin) {
+    int fd = open("gpio", pin);
+    if (fd >= 0)
+        control(fd, GPIO_OUTPUT, 0);
+    return fd;
+}
+
+static void load_set(int fd, unsigned char level) {
+    if (fd >= 0)
+        write(fd, &level, 1);
+}
+
+static void loads_set(unsigned char level) {
+    load_set(solenoid, level);
+    load_set(pump, level);
 }
 
 void pot_init(void) {
-    relay = open("gpio", RELAY_PIN);
-    if (relay >= 0)
-        control(relay, GPIO_OUTPUT, 0);
-    relay_set(RELAY_OFF);
+    pump = load_open(PUMP_PIN);
+    solenoid = load_open(SOLENOID_PIN);
+    loads_set(LOAD_OFF);
 }
 
 int pot_start(int tea) {
@@ -36,7 +49,7 @@ int pot_start(int tea) {
     state = POT_BREWING;
     brewing = tea;
     started = clktime;
-    relay_set(RELAY_ON);
+    loads_set(LOAD_ON);
     return 0;
 }
 
@@ -44,7 +57,7 @@ int pot_stop(void) {
     if (state != POT_BREWING)
         return -1;
     state = POT_IDLE;
-    relay_set(RELAY_OFF);
+    loads_set(LOAD_OFF);
     return 0;
 }
 
