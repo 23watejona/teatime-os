@@ -27,6 +27,7 @@
 #define PBUS_CFG_MIRROR        0x6000059c
 #define PBUS_STATUS            0x600005a0
 #define PBUS_READY             0x40000000
+#define PBUS_BUSY              0x80000000
 #define PBUS_READ_WINDOW       0x600005a4
 
 #define RFPLL_CTRL           0x600005c8

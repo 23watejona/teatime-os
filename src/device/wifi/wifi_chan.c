@@ -72,7 +72,7 @@ void wifi_set_channel(unsigned int ch) {
         2447, 2452, 2457, 2462, 2467, 2472, 2484
     };
     unsigned int f = freq_mhz[ch - 1];
-    unsigned int v = ((52428800u + f / 2u) / f) & 0x7fff;
+    unsigned int v = (((100u << 19) + f / 2u) / f) & 0x7fff;
     WRITE_REG_RMW(BB_CHAN_FREQ, 0x00001fff, 0x6000 | (v << 17));
 
     // the rf handshake isn't up at boot, so the rx compensation only applies on later channel changes
