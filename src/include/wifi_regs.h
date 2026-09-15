@@ -38,9 +38,11 @@
 #define MAC_KEY_ADDR(s)      MAC_KEY_SLOT(s)
 #define MAC_KEY_FLAGS(s)     (MAC_KEY_SLOT(s) + 4)
 #define MAC_KEY_MATERIAL(s, w) (MAC_KEY_SLOT(s) + 8 + 4 * (w))
-// key flag word: bits 18-20 key type (3 for a station key), bits 21-23 cipher code (2 = ccmp), bit 24 key id, bit 31 marks a unicast key
-#define MAC_KEY_CCMP         0x004c0000
-#define MAC_KEY_ID_SHIFT     24
+// bit 24 of the flag word is the interface index, not the key id, so the id goes in the top two bits
+#define MAC_KEY_CIPHER_CCMP  (3u << 18)
+#define MAC_KEY_GROUP_CLASS  (6u << 21)
+#define MAC_KEY_PAIRWISE_CLASS (2u << 21)
+#define MAC_KEY_ID_SHIFT     30
 
 #define MAC_CTRL             0x3ff20c14
 #define MAC_INT_ENABLE       0x3ff20c18

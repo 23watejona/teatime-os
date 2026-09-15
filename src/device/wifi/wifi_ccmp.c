@@ -13,7 +13,7 @@
 extern unsigned char ap_bssid[6];
 extern unsigned char wifi_mac_addr[6];
 
-// the slot number, not the flag word, picks the key class: group frames draw from slots 2-5 matched on a2=bssid and unicast from 6-7, so swapping them makes the hw decrypt group frames with the pairwise key
+// the hardware looks for group keys in one slot range and the pairwise key in the other, so each slot's flag word must carry the class code for its range
 #define GROUP_KEY_SLOT    2
 #define PAIRWISE_KEY_SLOT 6
 
@@ -29,14 +29,14 @@ static void write_key(unsigned int slot, unsigned int flags, const u8 *key) {
     WRITE_REG_MASK(MAC_KEY_ENABLE, 1u << slot);
 }
 
-// the group key carries its key id in the flag word, so a rekey to the other id lands in the same slot with the id the ap will use
+// a group frame is matched to its entry by the key id in the ccmp header, so a rekey rewrites the same slot with the new id
 static void write_gtk(void) {
-    write_key(GROUP_KEY_SLOT, MAC_KEY_CCMP | ((wpa_gtk_id & 1) << MAC_KEY_ID_SHIFT), wpa_gtk);
+    write_key(GROUP_KEY_SLOT, MAC_KEY_CIPHER_CCMP | MAC_KEY_GROUP_CLASS | (wpa_gtk_id << MAC_KEY_ID_SHIFT), wpa_gtk);
 }
 
 void wifi_ccmp_install_keys(void) {
     write_gtk();
-    write_key(PAIRWISE_KEY_SLOT, MAC_KEY_CCMP, wpa_tk);
+    write_key(PAIRWISE_KEY_SLOT, MAC_KEY_CIPHER_CCMP | MAC_KEY_PAIRWISE_CLASS, wpa_tk);
 
     WRITE_REG(MAC_CRYPTO_CIPHER, MAC_CIPHER_CCMP);
 
