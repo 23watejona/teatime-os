@@ -2,290 +2,170 @@
 #include "uart.h"
 #include "dev.h"
 #include "tcp.h"
+#include "http.h"
 #include "pot.h"
 
 #define HTCPCP_PORT 80
 #define REQ_MAX 1024
 #define RESP_MAX 1024
 #define BODY_MAX 256
+#define ALTERNATES_MAX 256
 
-#define CRLF "\r\n"
+struct conn {
+    struct http_request request;
+    char req[REQ_MAX];
+    char resp[RESP_MAX];
+    char body[BODY_MAX];
+};
 
-static unsigned char req[REQ_MAX];
-static unsigned int req_len;
-static unsigned int req_body;
-
-static char resp[RESP_MAX];
-static unsigned int resp_len;
-static char body[BODY_MAX];
-static unsigned int body_len;
-
-static int lower(int c) {
-    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
-}
-
-static int equal_ci(const unsigned char *s, unsigned int n, const char *word) {
-    if (strlen(word) != n)
-        return 0;
-    for (unsigned int i = 0; i < n; i++)
-        if (lower(s[i]) != lower(word[i]))
-            return 0;
-    return 1;
-}
-
-static int equal(const unsigned char *s, unsigned int n, const char *word) {
-    return strlen(word) == n && memcmp(s, word, n) == 0;
-}
-
-static int find(const unsigned char *s, unsigned int n, const char *word) {
-    unsigned int wn = strlen(word);
-    for (unsigned int i = 0; i + wn <= n; i++)
-        if (memcmp(s + i, word, wn) == 0)
-            return (int) i;
-    return -1;
-}
-
-static unsigned int parse_uint(const unsigned char *s, unsigned int n) {
-    unsigned int v = 0;
-    for (unsigned int i = 0; i < n && s[i] >= '0' && s[i] <= '9'; i++)
-        v = v * 10 + (s[i] - '0');
-    return v;
-}
-
-static int header(const char *name, const unsigned char **val, unsigned int *vlen) {
-    unsigned int pos = find(req, req_body, CRLF) + 2;
-    unsigned int nlen = strlen(name);
-    while (pos < req_body) {
-        unsigned int end = pos + find(req + pos, req_body - pos, CRLF);
-        if (end == pos)
-            break;
-        if (end - pos > nlen && req[pos + nlen] == ':' && equal_ci(req + pos, nlen, name)) {
-            unsigned int v = pos + nlen + 1;
-            while (v < end && req[v] == ' ')
-                v++;
-            *val = req + v;
-            *vlen = end - v;
-            return 1;
-        }
-        pos = end + 2;
-    }
-    return 0;
-}
-
-static void put(const char *s) {
-    unsigned int n = strlen(s);
-    if (n > RESP_MAX - resp_len)
-        n = RESP_MAX - resp_len;
-    memcpy(resp + resp_len, s, n);
-    resp_len += n;
-}
-
-static void body_put(const char *s) {
-    unsigned int n = strlen(s);
-    if (n > BODY_MAX - body_len)
-        n = BODY_MAX - body_len;
-    memcpy(body + body_len, s, n);
-    body_len += n;
-}
-
-static void body_put_int(int v) {
-    char digits[12];
-    body_put(itoa(v, digits, 10));
-}
-
-static void begin(const char *status) {
+static void begin(struct conn *c, const char *status) {
     kprintf_uart("htcpcp: %s\n", status);
-    resp_len = 0;
-    body_len = 0;
-    put("HTTP/1.1 ");
-    put(status);
-    put(CRLF);
+    http_response_status(c->resp, status);
+    c->body[0] = '\0';
 }
 
-static void alternates(void) {
-    put("Alternates: ");
+static void alternates(struct conn *c) {
+    char value[ALTERNATES_MAX];
+    value[0] = '\0';
     for (int i = 0; i < POT_TEAS; i++) {
         if (i > 0)
-            put(", ");
-        put("{\"");
-        put(pot_teas[i].uri);
-        put("\" {type message/teapot}}");
+            strcat(value, ", ");
+        strcat(value, "{\"");
+        strcat(value, pot_teas[i].uri);
+        strcat(value, "\" {type message/teapot}}");
     }
-    put(CRLF);
+    http_response_header(c->resp, "Alternates", value);
 }
 
-static void finish(void) {
-    char digits[12];
-    put("Content-Type: text/plain" CRLF "Content-Length: ");
-    put(itoau(body_len, digits, 10));
-    put(CRLF "Connection: close" CRLF CRLF);
-    if (body_len > RESP_MAX - resp_len)
-        body_len = RESP_MAX - resp_len;
-    memcpy(resp + resp_len, body, body_len);
-    resp_len += body_len;
+static void finish(struct conn *c) {
+    http_response_header(c->resp, "Content-Type", "text/plain");
+    http_response_header(c->resp, "Connection", "close");
+    http_response_body(c->resp, c->body);
 }
 
-static void reply(const char *status, const char *text) {
-    begin(status);
-    body_put(text);
-    body_put(CRLF);
-    finish();
+static void reply(struct conn *c, const char *status, const char *text) {
+    begin(c, status);
+    strcat(c->body, text);
+    strcat(c->body, HTTP_CRLF);
+    finish(c);
 }
 
-static void menu(void) {
-    begin("200 OK");
+static void menu(struct conn *c) {
+    begin(c, "200 OK");
     for (int i = 0; i < POT_TEAS; i++) {
-        body_put(pot_teas[i].uri);
-        body_put(CRLF);
+        strcat(c->body, pot_teas[i].uri);
+        strcat(c->body, HTTP_CRLF);
     }
-    finish();
+    finish(c);
 }
 
-static void status(void) {
+static void status(struct conn *c) {
     struct pot_status st;
     pot_status(&st);
-    begin("200 OK");
+    begin(c, "200 OK");
     if (st.state == POT_IDLE) {
-        body_put("idle");
+        strcat(c->body, "idle");
     } else {
-        body_put("brewing ");
-        body_put(pot_teas[st.tea].uri);
-        body_put(" for ");
-        body_put_int((int) st.elapsed_secs);
-        body_put("s, strength ");
-        body_put_int(st.strength);
-        body_put("%");
+        strcat(c->body, "brewing ");
+        strcat(c->body, pot_teas[st.tea].uri);
+        strcat(c->body, " for ");
+        itoau(st.elapsed_secs, c->body + strlen(c->body), 10);
+        strcat(c->body, "s, strength ");
+        itoa(st.strength, c->body + strlen(c->body), 10);
+        strcat(c->body, "%");
     }
-    body_put(CRLF);
-    finish();
+    strcat(c->body, HTTP_CRLF);
+    finish(c);
 }
 
-static void brew(int tea) {
-    const unsigned char *v;
-    unsigned int vn;
-    if (header("Accept-Additions", &v, &vn) && vn > 0) {
-        reply("406 Not Acceptable", "no additions available");
+static void brew(struct conn *c, int tea) {
+    const char *additions = http_request_header(&c->request, "Accept-Additions");
+    if (additions && *additions) {
+        reply(c, "406 Not Acceptable", "no additions available");
         return;
     }
-    const unsigned char *cmd = req + req_body;
-    unsigned int cmd_len = req_len - req_body;
-    if (equal(cmd, cmd_len, "start")) {
+    if (strcmp(c->request.body, "start") == 0) {
         if (pot_start(tea) < 0) {
-            reply("503 Service Unavailable", "pot is busy");
+            reply(c, "503 Service Unavailable", "pot is busy");
             return;
         }
-        begin("200 OK");
-        body_put("brewing ");
-        body_put(pot_teas[tea].uri);
-        body_put(CRLF);
-        finish();
-    } else if (equal(cmd, cmd_len, "stop")) {
+        begin(c, "200 OK");
+        strcat(c->body, "brewing ");
+        strcat(c->body, pot_teas[tea].uri);
+        strcat(c->body, HTTP_CRLF);
+        finish(c);
+    } else if (strcmp(c->request.body, "stop") == 0) {
         struct pot_status st;
         pot_status(&st);
         if (pot_stop() < 0) {
-            reply("400 Bad Request", "nothing brewing");
+            reply(c, "400 Bad Request", "nothing brewing");
             return;
         }
-        begin("200 OK");
-        body_put("served ");
-        body_put(pot_teas[st.tea].uri);
-        body_put(" at strength ");
-        body_put_int(st.strength);
-        body_put("%" CRLF);
-        finish();
+        begin(c, "200 OK");
+        strcat(c->body, "served ");
+        strcat(c->body, pot_teas[st.tea].uri);
+        strcat(c->body, " at strength ");
+        itoa(st.strength, c->body + strlen(c->body), 10);
+        strcat(c->body, "%" HTTP_CRLF);
+        finish(c);
     } else {
-        reply("400 Bad Request", "body must be start or stop");
+        reply(c, "400 Bad Request", "body must be start or stop");
     }
 }
 
-static void handle(void) {
-    unsigned int line = (unsigned int) find(req, req_len, CRLF);
-    int sp1 = find(req, line, " ");
-    if (sp1 < 0) {
-        reply("400 Bad Request", "malformed request line");
-        return;
-    }
-    unsigned int uri = sp1 + 1;
-    int sp2 = find(req + uri, line - uri, " ");
-    if (sp2 < 0) {
-        reply("400 Bad Request", "malformed request line");
-        return;
-    }
-    unsigned int uri_len = sp2;
-    int q = find(req + uri, uri_len, "?");
-    if (q >= 0)
-        uri_len = q;
-    int scheme = find(req + uri, uri_len, "://");
-    if (scheme >= 0) {
-        unsigned int host = uri + scheme + 3;
-        int slash = find(req + host, uri + uri_len - host, "/");
-        uri_len = slash < 0 ? 0 : uri + uri_len - (host + slash);
-        uri = host + slash;
-    }
-    int root = uri_len == 0 || equal(req + uri, uri_len, "/");
+static void handle(struct conn *c) {
+    const char *path = c->request.path;
+    const char *method = c->request.method;
+    int root = strcmp(path, "/") == 0;
     int tea = -1;
     for (int i = 0; i < POT_TEAS; i++)
-        if (equal(req + uri, uri_len, pot_teas[i].uri))
+        if (strcmp(path, pot_teas[i].uri) == 0)
             tea = i;
     if (!root && tea < 0) {
-        reply("404 Not Found", "no such tea");
+        reply(c, "404 Not Found", "no such tea");
         return;
     }
 
-    const unsigned char *method = req;
-    unsigned int method_len = sp1;
-    if (equal(method, method_len, "GET")) {
+    if (strcmp(method, "GET") == 0) {
         if (root)
-            menu();
+            menu(c);
         else
-            status();
+            status(c);
         return;
     }
-    if (!equal(method, method_len, "BREW") && !equal(method, method_len, "POST")) {
-        reply("501 Not Implemented", "method not implemented");
+    if (strcmp(method, "BREW") != 0 && strcmp(method, "POST") != 0) {
+        reply(c, "501 Not Implemented", "method not implemented");
         return;
     }
-    const unsigned char *type;
-    unsigned int type_len;
-    if (!header("Content-Type", &type, &type_len)) {
-        reply("415 Unsupported Media Type", "Content-Type must be message/teapot");
+    char *type = http_request_header(&c->request, "Content-Type");
+    if (!type) {
+        reply(c, "415 Unsupported Media Type", "Content-Type must be message/teapot");
         return;
     }
-    int params = find(type, type_len, ";");
-    if (params >= 0)
-        type_len = params;
-    int teapot = equal_ci(type, type_len, "message/teapot");
-    int coffeepot = equal_ci(type, type_len, "message/coffeepot");
+    char *params = strchr(type, ';');
+    if (params)
+        *params = '\0';
+    int teapot = strcasecmp(type, "message/teapot") == 0;
+    int coffeepot = strcasecmp(type, "message/coffeepot") == 0;
     if (!teapot && !coffeepot) {
-        reply("415 Unsupported Media Type", "Content-Type must be message/teapot");
+        reply(c, "415 Unsupported Media Type", "Content-Type must be message/teapot");
         return;
     }
     if (root) {
-        begin("300 Multiple Options");
-        alternates();
+        begin(c, "300 Multiple Options");
+        alternates(c);
         for (int i = 0; i < POT_TEAS; i++) {
-            body_put(pot_teas[i].uri);
-            body_put(CRLF);
+            strcat(c->body, pot_teas[i].uri);
+            strcat(c->body, HTTP_CRLF);
         }
-        finish();
+        finish(c);
         return;
     }
     if (coffeepot) {
-        reply("418 I'm a teapot", "this is a teapot");
+        reply(c, "418 I'm a teapot", "this is a teapot");
         return;
     }
-    brew(tea);
-}
-
-static int request_complete(void) {
-    int end = find(req, req_len, CRLF CRLF);
-    if (end < 0)
-        return 0;
-    req_body = end + 4;
-    const unsigned char *v;
-    unsigned int vn;
-    unsigned int content_len = header("Content-Length", &v, &vn) ? parse_uint(v, vn) : 0;
-    return req_len - req_body >= content_len;
+    brew(c, tea);
 }
 
 void htcpcp_proc(void) {
@@ -295,26 +175,22 @@ void htcpcp_proc(void) {
         kprintf_uart("htcpcp: listen failed\n");
         return;
     }
+    struct conn c;
     while (1) {
-        int conn = control(listener, TCP_ACCEPT, 0);
-        if (conn < 0)
+        int fd = control(listener, TCP_ACCEPT, 0);
+        if (fd < 0)
             continue;
-        req_len = 0;
-        int n = 1;
-        while (n > 0 && req_len < REQ_MAX && !request_complete()) {
-            n = read(conn, req + req_len, REQ_MAX - req_len);
-            if (n > 0)
-                req_len += n;
-        }
-        if (n < 0) {
-            close(conn);
+        int n = read(fd, c.req, REQ_MAX - 1);
+        if (n <= 0) {
+            close(fd);
             continue;
         }
-        if (request_complete())
-            handle();
+        c.req[n] = '\0';
+        if (http_request_parse(c.req, &c.request) == 0)
+            handle(&c);
         else
-            reply("400 Bad Request", "incomplete request");
-        write(conn, resp, resp_len);
-        close(conn);
+            reply(&c, "400 Bad Request", "bad request");
+        write(fd, c.resp, strlen(c.resp));
+        close(fd);
     }
 }

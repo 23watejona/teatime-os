@@ -36,10 +36,56 @@ unsigned long strlen(const char *s) {
     return n;
 }
 
+char *strcpy(char *dst, const char *src) {
+    memcpy(dst, src, strlen(src) + 1);
+    return dst;
+}
+
+char *strcat(char *dst, const char *src) {
+    strcpy(dst + strlen(dst), src);
+    return dst;
+}
+
 int strcmp(const char *a, const char *b) {
     while (*a && *a == *b) {
         a++;
         b++;
     }
     return (unsigned char)*a - (unsigned char)*b;
+}
+
+int tolower(int c) {
+    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+}
+
+int strcasecmp(const char *a, const char *b) {
+    while (*a && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+        a++;
+        b++;
+    }
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+
+int strncasecmp(const char *a, const char *b, unsigned long n) {
+    for (unsigned long i = 0; i < n; i++) {
+        int d = tolower((unsigned char)a[i]) - tolower((unsigned char)b[i]);
+        if (d || !a[i])
+            return d;
+    }
+    return 0;
+}
+
+char *strchr(const char *s, int c) {
+    for (; *s; s++)
+        if (*s == (char)c)
+            return (char *)s;
+    return c == 0 ? (char *)s : 0;
+}
+
+char *strstr(const char *hay, const char *needle) {
+    unsigned long n = strlen(needle);
+    for (; *hay; hay++)
+        if (memcmp(hay, needle, n) == 0)
+            return (char *)hay;
+    return n == 0 ? (char *)hay : 0;
 }
