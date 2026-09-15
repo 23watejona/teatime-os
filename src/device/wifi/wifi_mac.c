@@ -13,7 +13,7 @@ static void mac_options_init(void) {
     WRITE_REG_MASK(MAC_RX_OPTION, 0x8084a000);
     WRITE_REG_RMW(MAC_RX_OPTION, 0xffdfbff7, 0);
     WRITE_REG_MASK(MAC_RXTX_OPTION, 0x00000008);
-    // automatic ack on, so the ap sees our replies acknowledged
+    // mac transmit enable and one more tx option bit
     WRITE_REG_MASK(MAC_TX_OPTION, 0x00000003);
     // phy interface mode field cleared to its default
     WRITE_REG_RMW(MAC_PHY_CONF, 0xffffff0f, 0);
@@ -54,7 +54,7 @@ void init_wifi_mac(void) {
     // third crypto word cleared; its meaning is not known
     WRITE_REG(0x3ff20808, 0);
     init_wifi_dma();
-    // rate index map, one nibble per rate, and two all-ones words behind it
+    // rate index map, one nibble per rate (channel 14 remaps every entry to one cck rate), and two all-ones words behind it
     WRITE_REG(0x3ff20400, 0x76503210);
     WRITE_REG(0x3ff20404, 0xbbbbbbbb);
     WRITE_REG(0x3ff20408, 0xbbbbbbbb);
@@ -111,7 +111,7 @@ void wifi_mac_rx_enable(void) {
     // the two sniffer rx events added to the serviced set, so unfiltered frames raise the fiq
     WRITE_REG(MAC_INT_ENABLE, WDEV_INTEREST_EVENT | WDEV_SNIFFER_EVENT);
 
-    // baseband rx mode bits that the sniffer runs without; the delay lets the rx path settle before acks are turned off
+    // baseband rx mode bits that the sniffer runs without; the delay lets the rx path settle before the mac transmit enable is dropped, which stops acks
     WRITE_REG_UNMASK(0x60009d44, 0x24000000);
     wait_us(15000);
     WRITE_REG_UNMASK(MAC_TX_OPTION, 0x00000001);
@@ -148,7 +148,7 @@ void wifi_mac_rx_enable(void) {
     WRITE_REG(0x600005fc, 0x000c0b0a);
     rtc.analog_0 = 0x00200000;
     WRITE_REG_UNMASK(BBPLL_CTRL, 0x10000000);
-    // the sar adc's top control bits, its done bits, then its data words; the tx power measurement runs on it
+    // sar adc control (bit 0 is the tx power-detector enable, bit 31 undecoded) and mode registers, its done bits, then its data words; the tx power measurement runs on it
     WRITE_REG_MASK(0x60000d50, 0x80000000);
     WRITE_REG_MASK(0x60000d5c, 0x80000000);
     WRITE_REG(0x60000d60, 0x00000003);

@@ -50,7 +50,7 @@
 #define WDEV_INTEREST_EVENT  0x2c880300
 #define WDEV_SNIFFER_EVENT   0x0000000c
 
-// two address-match units, each with an address and a byte mask; bit 16 of the mask high word enables the unit
+// two address-match units, each with an address and a byte mask; bit 16 of the mask high word enables the unit and is held for as long as its interface is up (unit 0 station, unit 1 access point)
 #define MAC_BSSID_LO(u)      (0x3ff20c28 + 8 * (u))
 #define MAC_BSSID_HI(u)      (0x3ff20c2c + 8 * (u))
 #define MAC_BSSID_MASK_LO(u) (0x3ff20c38 + 8 * (u))
@@ -64,7 +64,7 @@
 #define MAC_PHY_CTRL         0x3ff20c70
 #define MAC_PHY_RF_UP        0x00000002
 #define MAC_TX_STATUS        0x3ff20c84
-// rx option bit 18 passes protected frames to the dma (sniffer raw delivery, but also needed for decrypted delivery); tx option bit 0 is the automatic ack
+// rx option bit 18 passes protected frames to the dma (sniffer raw delivery, but also needed for decrypted delivery); tx option bit 0 is the mac transmit enable, which the sniffer clears so nothing is acked
 #define MAC_RX_OPTION        0x3ff20c88
 #define MAC_RXTX_OPTION      0x3ff20c90
 #define MAC_TX_OPTION        0x3ff20c94

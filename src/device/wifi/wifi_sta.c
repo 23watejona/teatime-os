@@ -66,7 +66,7 @@ static void program_rx_filter(void) {
     WRITE_REG_MASK(MAC_CRYPTO_CONF, 0x00010000);
     // raw delivery stays on even though the vendor clears it on sniffer exit: with it clear the mac drops every protected frame instead of decrypting, observed on hardware
     WRITE_REG_MASK(MAC_RX_OPTION, 0x00040000);
-    // automatic ack back on, the baseband's normal rx mode bits back, and all three address filters enabled
+    // mac transmit enable back on so acks go out, the baseband's normal rx mode bits back, and all three address filters enabled
     WRITE_REG_MASK(MAC_TX_OPTION, 0x00000001);
     WRITE_REG_MASK(0x60009d44, 0x24000000);
     WRITE_REG_MASK(MAC_RX_FILTER, 0x00000007);
