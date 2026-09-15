@@ -1,6 +1,7 @@
 #include "def.h"
 #include "reg_util.h"
 #include "wifi_regs.h"
+#include "wifi_frame.h"
 #include "wifi_dma.h"
 #include "wifi_sta.h"
 #include "proc.h"
@@ -93,8 +94,9 @@ static void rx_dump(unsigned char *p, unsigned int len) {
     static unsigned char llc[2048] __attribute__((aligned(4)));
     int nl = wifi_ccmp_rx(p, len, llc);
     if (nl > 0) {
-        const unsigned char *sa = p + 12 + 16;
-        if (nl >= 8 && llc[6] == 0x88 && llc[7] == 0x8e)
+        const unsigned char *sa = ((struct mac_header *)(p + RXCTRL_LEN))->addr3;
+        const struct llc_snap *snap = (const struct llc_snap *)llc;
+        if (nl >= LLC_SNAP_LEN && ((snap->ethertype[0] << 8) | snap->ethertype[1]) == ETHERTYPE_EAPOL)
             wifi_wpa_eapol(llc, (unsigned int) nl);
         else
             net_recv(llc, (unsigned int) nl, sa);

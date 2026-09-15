@@ -2,6 +2,7 @@
 #include "uart.h"
 #include "string.h"
 #include "wifi_crypto.h"
+#include "wifi_frame.h"
 #include "wifi_tx.h"
 #include "wifi_wpa.h"
 #include "wifi_ccmp.h"
@@ -30,6 +31,11 @@ static u8 replay[8];
 #define KEK  (ptk + 16)
 #define TK   (ptk + 32)
 
+#define EAPOL_VERSION  1
+#define EAPOL_TYPE_KEY 3
+#define EAPOL_HDR_LEN  4
+#define KEY_DESC_RSN   2
+
 #define E_VERSION   0
 #define E_TYPE      1
 #define E_BODYLEN   2
@@ -49,11 +55,13 @@ static u8 replay[8];
 #define KI_SECURE   0x0200
 #define KI_ENCDATA  0x1000
 
-static const u8 rsn_ie[] = {
-    0x30, 0x14, 0x01, 0x00,
-    0x00, 0x0f, 0xac, 0x04,
-    0x01, 0x00, 0x00, 0x0f, 0xac, 0x04,
-    0x01, 0x00, 0x00, 0x0f, 0xac, 0x02,
+// the same ie goes in the association request and in msg2 of the 4-way, so the ap sees one consistent cipher choice
+const unsigned char rsn_ie[RSN_IE_LEN] = {
+    IE_RSN, RSN_IE_LEN - IE_HDR_LEN,
+    RSN_VERSION, 0x00,
+    RSN_SUITE(RSN_CIPHER_CCMP),
+    0x01, 0x00, RSN_SUITE(RSN_CIPHER_CCMP),
+    0x01, 0x00, RSN_SUITE(RSN_AKM_PSK),
     0x00, 0x00,
 };
 
@@ -89,26 +97,30 @@ static void derive_ptk(void) {
 static void send_eapol(unsigned int keyinfo, const u8 *nonce,
                        const u8 *keydata, unsigned int kdlen) {
     u8 f[256];
-    unsigned int n = 0;
+    struct mac_header *mac = (struct mac_header *)f;
+    memset(mac, 0, sizeof(*mac));
+    mac->frame_control[0] = FC_DATA;
+    mac->frame_control[1] = FC_TO_DS;
+    memcpy(mac->addr1, ap_bssid, 6);
+    memcpy(mac->addr2, wifi_mac_addr, 6);
+    memcpy(mac->addr3, ap_bssid, 6);
 
-    f[n++] = 0x08; f[n++] = 0x01;
-    f[n++] = 0x00; f[n++] = 0x00;
-    for (int i = 0; i < 6; i++) f[n++] = ap_bssid[i];
-    for (int i = 0; i < 6; i++) f[n++] = wifi_mac_addr[i];
-    for (int i = 0; i < 6; i++) f[n++] = ap_bssid[i];
-    f[n++] = 0x00; f[n++] = 0x00;
+    struct llc_snap *llc = (struct llc_snap *)(f + MAC_HDR_LEN);
+    memset(llc, 0, sizeof(*llc));
+    llc->dsap = LLC_SAP_SNAP;
+    llc->ssap = LLC_SAP_SNAP;
+    llc->control = LLC_CONTROL_UI;
+    llc->ethertype[0] = ETHERTYPE_EAPOL >> 8;
+    llc->ethertype[1] = ETHERTYPE_EAPOL & 0xff;
 
-    f[n++] = 0xaa; f[n++] = 0xaa; f[n++] = 0x03;
-    f[n++] = 0x00; f[n++] = 0x00; f[n++] = 0x00;
-    f[n++] = 0x88; f[n++] = 0x8e;
-
+    unsigned int n = MAC_HDR_LEN + LLC_SNAP_LEN;
     u8 *e = f + n;
-    unsigned int blen = 95 + kdlen;
-    memset(e, 0, 99 + kdlen);
-    e[E_VERSION] = 0x01;
-    e[E_TYPE] = 0x03;
+    unsigned int blen = E_KEYDATA - EAPOL_HDR_LEN + kdlen;
+    memset(e, 0, E_KEYDATA + kdlen);
+    e[E_VERSION] = EAPOL_VERSION;
+    e[E_TYPE] = EAPOL_TYPE_KEY;
     e[E_BODYLEN] = blen >> 8; e[E_BODYLEN + 1] = blen;
-    e[E_DESC] = 0x02;
+    e[E_DESC] = KEY_DESC_RSN;
     e[E_KEYINFO] = keyinfo >> 8; e[E_KEYINFO + 1] = keyinfo;
     e[E_KEYLEN] = 0x00; e[E_KEYLEN + 1] = kdlen ? 16 : 0;
     memcpy(e + E_REPLAY, replay, 8);
@@ -119,39 +131,40 @@ static void send_eapol(unsigned int keyinfo, const u8 *nonce,
         memcpy(e + E_KEYDATA, keydata, kdlen);
 
     u8 mic[SHA1_DIGEST];
-    hmac_sha1(KCK, 16, e, 99 + kdlen, mic);
+    hmac_sha1(KCK, 16, e, E_KEYDATA + kdlen, mic);
     memcpy(e + E_MIC, mic, 16);
 
-    n += 99 + kdlen;
+    n += E_KEYDATA + kdlen;
     // before WPA_DONE no key is installed so the 4-way goes out in the clear, but a group-rekey reply must ride the encrypted link like any other data
     if (wpa_state == WPA_DONE)
-        wifi_ccmp_tx(ap_bssid, f + 24, n - 24);
+        wifi_ccmp_tx(ap_bssid, f + MAC_HDR_LEN, n - MAC_HDR_LEN);
     else
         wifi_tx_frame(f, n);
 }
 
 static volatile u8 *find_eapol(volatile u8 *f, unsigned int flen) {
     unsigned int fc0 = f[0];
-    if (((fc0 >> 2) & 3) != 2)
+    if (FC_TYPE(fc0) != FC_TYPE_DATA)
         return 0;
-    unsigned int hdr = 24;
-    if ((fc0 >> 4) & 8)
-        hdr += 2;
-    if (flen < hdr + 8 + 4)
+    unsigned int hdr = MAC_HDR_LEN;
+    if (FC_SUBTYPE(fc0) & SUBTYPE_QOS)
+        hdr += QOS_CTRL_LEN;
+    if (flen < hdr + LLC_SNAP_LEN + EAPOL_HDR_LEN)
         return 0;
-    volatile u8 *s = f + hdr;
-    if (s[0] != 0xaa || s[1] != 0xaa || s[2] != 0x03 ||
-        s[6] != 0x88 || s[7] != 0x8e)
+    volatile struct llc_snap *llc = (volatile struct llc_snap *)(f + hdr);
+    if (llc->dsap != LLC_SAP_SNAP || llc->ssap != LLC_SAP_SNAP || llc->control != LLC_CONTROL_UI ||
+        ((llc->ethertype[0] << 8) | llc->ethertype[1]) != ETHERTYPE_EAPOL)
         return 0;
-    return s + 8;
+    return f + hdr + LLC_SNAP_LEN;
 }
 
 static int from_our_ap(volatile u8 *f) {
+    volatile struct mac_header *h = (volatile struct mac_header *)f;
     for (int i = 0; i < 6; i++)
-        if (f[4 + i] != wifi_mac_addr[i])
+        if (h->addr1[i] != wifi_mac_addr[i])
             return 0;
     for (int i = 0; i < 6; i++)
-        if (f[10 + i] != ap_bssid[i])
+        if (h->addr2[i] != ap_bssid[i])
             return 0;
     return 1;
 }
@@ -250,14 +263,14 @@ static void handle_group_m1(volatile u8 *e, unsigned int elen) {
 void wifi_wpa_eapol(unsigned char *llc, unsigned int len) {
     if (wpa_state != WPA_DONE)
         return;
-    if (len < 8 + 99)
+    if (len < LLC_SNAP_LEN + E_KEYDATA)
         return;
-    u8 *e = llc + 8;
-    if (e[E_TYPE] != 0x03)
+    u8 *e = llc + LLC_SNAP_LEN;
+    if (e[E_TYPE] != EAPOL_TYPE_KEY)
         return;
     unsigned int ki = (e[E_KEYINFO] << 8) | e[E_KEYINFO + 1];
-    unsigned int elen = 4 + ((e[E_BODYLEN] << 8) | e[E_BODYLEN + 1]);
-    if (8 + elen > len)
+    unsigned int elen = EAPOL_HDR_LEN + ((e[E_BODYLEN] << 8) | e[E_BODYLEN + 1]);
+    if (LLC_SNAP_LEN + elen > len)
         return;
     if ((ki & (KI_PAIRWISE | KI_MIC | KI_ACK)) == (KI_MIC | KI_ACK))
         handle_group_m1(e, elen);
@@ -270,20 +283,20 @@ void wpa_reset(void) {
 void wifi_wpa_input(volatile unsigned char *buf, unsigned int len) {
     if (wpa_state == WPA_IDLE)
         return;
-    if (len < 12 + 24)
+    if (len < RXCTRL_LEN + MAC_HDR_LEN)
         return;
-    volatile u8 *f = buf + 12;
-    unsigned int flen = len - 12;
+    volatile u8 *f = buf + RXCTRL_LEN;
+    unsigned int flen = len - RXCTRL_LEN;
 
     volatile u8 *e = find_eapol(f, flen);
     if (!e || !from_our_ap(f))
         return;
-    if (e[E_TYPE] != 0x03)
+    if (e[E_TYPE] != EAPOL_TYPE_KEY)
         return;
 
     unsigned int ki = (e[E_KEYINFO] << 8) | e[E_KEYINFO + 1];
-    unsigned int elen = 4 + ((e[E_BODYLEN] << 8) | e[E_BODYLEN + 1]);
-    if (12 + (unsigned int)(e - f) + elen > len)
+    unsigned int elen = EAPOL_HDR_LEN + ((e[E_BODYLEN] << 8) | e[E_BODYLEN + 1]);
+    if (RXCTRL_LEN + (unsigned int)(e - f) + elen > len)
         return;
 
     // a lost msg2 or msg4 makes the ap retransmit msg1 or msg3, so both are handled again after their reply rather than gated on state

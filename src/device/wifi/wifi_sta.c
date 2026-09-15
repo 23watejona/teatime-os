@@ -4,6 +4,7 @@
 #include "wifi_regs.h"
 #include "uart.h"
 #include "string.h"
+#include "wifi_frame.h"
 #include "wifi_tx.h"
 #include "wifi_sta.h"
 #include "wifi_wpa.h"
@@ -73,46 +74,50 @@ static void program_rx_filter(void) {
 static unsigned int put_mgmt_hdr(unsigned char *b, unsigned int subtype) {
     struct mac_header *mac = (struct mac_header *)b;
     memset(mac, 0, sizeof(*mac));
-    mac->frame_control[0] = subtype << 4;
+    mac->frame_control[0] = subtype << FC_SUBTYPE_SHIFT;
     memcpy(mac->addr1, ap_bssid, 6);
     memcpy(mac->addr2, wifi_mac_addr, 6);
     memcpy(mac->addr3, ap_bssid, 6);
     return sizeof(*mac);
 }
 
+static unsigned int put_ie(unsigned char *b, unsigned int id,
+                           const unsigned char *data, unsigned int len) {
+    b[0] = id;
+    b[1] = len;
+    memcpy(b + IE_HDR_LEN, data, len);
+    return IE_HDR_LEN + len;
+}
+
 static void send_auth(void) {
     unsigned char f[64];
-    unsigned int n = put_mgmt_hdr(f, 11);
-    f[n++] = 0x00; f[n++] = 0x00;
-    f[n++] = 0x01; f[n++] = 0x00;
-    f[n++] = 0x00; f[n++] = 0x00;
+    unsigned int n = put_mgmt_hdr(f, MGMT_AUTH);
+    struct auth_body *auth = (struct auth_body *)(f + n);
+    auth->algorithm = AUTH_ALGO_OPEN;
+    auth->sequence = AUTH_SEQ_REQUEST;
+    auth->status = 0;
+    n += sizeof(*auth);
     wifi_tx_frame(f, n);
 }
 
-static const unsigned char rsn_ie[] = {
-    0x30, 0x14,
-    0x01, 0x00,
-    0x00, 0x0f, 0xac, 0x04,
-    0x01, 0x00, 0x00, 0x0f, 0xac, 0x04,
-    0x01, 0x00, 0x00, 0x0f, 0xac, 0x02,
-    0x00, 0x00,
+static const unsigned char supported_rates[] = {
+    RATE_BASIC | RATE_KBPS(1000), RATE_BASIC | RATE_KBPS(2000),
+    RATE_BASIC | RATE_KBPS(5500), RATE_BASIC | RATE_KBPS(11000),
+    RATE_KBPS(18000), RATE_KBPS(24000), RATE_KBPS(36000), RATE_KBPS(54000),
 };
 
 static void send_assoc(void) {
     unsigned char f[96];
-    unsigned int n = put_mgmt_hdr(f, 0);
-    f[n++] = 0x31; f[n++] = 0x04;
-    f[n++] = 0x03; f[n++] = 0x00;
+    unsigned int n = put_mgmt_hdr(f, MGMT_ASSOC_REQ);
+    struct assoc_req_body *assoc = (struct assoc_req_body *)(f + n);
+    assoc->capability = CAP_ESS | CAP_PRIVACY | CAP_SHORT_PREAMBLE | CAP_SHORT_SLOT;
+    assoc->listen_interval = 3;
+    n += sizeof(*assoc);
 
-    unsigned int slen = sizeof(ap_ssid) - 1;
-    f[n++] = 0x00; f[n++] = slen;
-    for (unsigned int i = 0; i < slen; i++) f[n++] = ap_ssid[i];
-
-    f[n++] = 0x01; f[n++] = 0x08;
-    f[n++] = 0x82; f[n++] = 0x84; f[n++] = 0x8b; f[n++] = 0x96;
-    f[n++] = 0x24; f[n++] = 0x30; f[n++] = 0x48; f[n++] = 0x6c;
-
-    for (unsigned int i = 0; i < sizeof(rsn_ie); i++) f[n++] = rsn_ie[i];
+    n += put_ie(f + n, IE_SSID, (const unsigned char *)ap_ssid, sizeof(ap_ssid) - 1);
+    n += put_ie(f + n, IE_SUPPORTED_RATES, supported_rates, sizeof(supported_rates));
+    memcpy(f + n, rsn_ie, RSN_IE_LEN);
+    n += RSN_IE_LEN;
     wifi_tx_frame(f, n);
 }
 
@@ -161,50 +166,51 @@ void wifi_station_tick(void) {
     }
 }
 
-static int from_our_ap(volatile unsigned char *f) {
+static int from_our_ap(volatile struct mac_header *h) {
     for (int i = 0; i < 6; i++)
-        if (f[4 + i] != wifi_mac_addr[i])
+        if (h->addr1[i] != wifi_mac_addr[i])
             return 0;
     for (int i = 0; i < 6; i++)
-        if (f[10 + i] != ap_bssid[i])
+        if (h->addr2[i] != ap_bssid[i])
             return 0;
     return 1;
 }
 
 void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
-    if (len < 12 + 30)
+    if (len < RXCTRL_LEN + MAC_HDR_LEN + sizeof(struct assoc_resp_body))
         return;
-    volatile unsigned char *f = buf + 12;
+    volatile struct mac_header *h = (volatile struct mac_header *)(buf + RXCTRL_LEN);
+    volatile unsigned char *body = (volatile unsigned char *)h + MAC_HDR_LEN;
 
     // beacons are broadcast and fail the directed check below, so liveness is tracked on the transmitter address alone
     int a2_ours = 1;
     for (int i = 0; i < 6; i++)
-        if (f[10 + i] != ap_bssid[i])
+        if (h->addr2[i] != ap_bssid[i])
             a2_ours = 0;
     if (a2_ours)
         last_heard = ticks();
 
-    unsigned int fc0 = f[0];
-    if (((fc0 >> 2) & 3) != 0)
+    unsigned int fc0 = h->frame_control[0];
+    if (FC_TYPE(fc0) != FC_TYPE_MGMT)
         return;
-    if (!from_our_ap(f))
+    if (!from_our_ap(h))
         return;
 
-    unsigned int subtype = (fc0 >> 4) & 0xf;
-    unsigned int body = 24;
+    unsigned int subtype = FC_SUBTYPE(fc0);
 
-    if (subtype == 12 || subtype == 10) {
+    if (subtype == MGMT_DEAUTH || subtype == MGMT_DISASSOC) {
+        volatile struct reason_body *r = (volatile struct reason_body *)body;
         kprintf_uart("sta: %s reason=%u, re-authenticating\n",
-                     subtype == 12 ? "DEAUTH" : "DISASSOC", f[body] | (f[body + 1] << 8));
+                     subtype == MGMT_DEAUTH ? "DEAUTH" : "DISASSOC", r->reason);
         if (wifi_sta_state != STA_INIT)
             link_down(0);
         return;
     }
 
-    if (subtype == 11) {
-        unsigned int aseq = f[body + 2] | (f[body + 3] << 8);
-        unsigned int status = f[body + 4] | (f[body + 5] << 8);
-        if (aseq != 2)
+    if (subtype == MGMT_AUTH) {
+        volatile struct auth_body *auth = (volatile struct auth_body *)body;
+        unsigned int status = auth->status;
+        if (auth->sequence != AUTH_SEQ_RESPONSE)
             return;
         if (status != 0) {
             kprintf_uart("sta: auth rejected status=%u\n", status);
@@ -215,9 +221,10 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
             last_tx = ticks() - RETRY_PERIOD;
             kprintf_uart("sta: authenticated, associating\n");
         }
-    } else if (subtype == 1) {
-        unsigned int status = f[body + 2] | (f[body + 3] << 8);
-        unsigned int aid = (f[body + 4] | (f[body + 5] << 8)) & 0x3fff;
+    } else if (subtype == MGMT_ASSOC_RESP) {
+        volatile struct assoc_resp_body *assoc = (volatile struct assoc_resp_body *)body;
+        unsigned int status = assoc->status;
+        unsigned int aid = assoc->aid & AID_MASK;
         if (status != 0) {
             kprintf_uart("sta: assoc rejected status=%u\n", status);
             return;

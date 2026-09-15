@@ -1,9 +1,7 @@
 #include "uart.h"
+#include "wifi_frame.h"
 
-#define RXCTRL_LEN   12
-#define MAC_HDR_LEN  24
-#define BEACON_FIXED 12
-#define TAG_OFFSET   (MAC_HDR_LEN + BEACON_FIXED)
+#define BEACON_IES (MAC_HDR_LEN + BEACON_FIXED)
 
 #define MAX_APS 256
 
@@ -42,21 +40,39 @@ static int is_target_bssid(const volatile unsigned char *b) {
     return 1;
 }
 
+static const char *rsn_security(const volatile unsigned char *ie, unsigned int len) {
+    unsigned int end = IE_HDR_LEN + len;
+    unsigned int p = IE_HDR_LEN + RSN_VERSION_LEN + RSN_SUITE_LEN;
+    unsigned int pairwise_count = ie[p] | (ie[p + 1] << 8);
+    unsigned int ccmp = 0;
+    unsigned int q = p + RSN_COUNT_LEN;
+    for (unsigned int k = 0; k < pairwise_count && q + RSN_SUITE_LEN <= end; k++, q += RSN_SUITE_LEN)
+        if (ie[q + 3] == RSN_CIPHER_CCMP) ccmp = 1;
+    unsigned int akm_count = (q + RSN_COUNT_LEN <= end) ? (ie[q] | (ie[q + 1] << 8)) : 0;
+    unsigned int a = q + RSN_COUNT_LEN, sae = 0, psk = 0;
+    for (unsigned int k = 0; k < akm_count && a + RSN_SUITE_LEN <= end; k++, a += RSN_SUITE_LEN) {
+        if (ie[a + 3] == RSN_AKM_SAE) sae = 1;
+        else if (ie[a + 3] == RSN_AKM_PSK || ie[a + 3] == RSN_AKM_PSK_SHA256) psk = 1;
+    }
+    return sae ? (psk ? "wpa2/3-psk/sae" : "wpa3-sae")
+               : (ccmp ? "wpa2-psk-ccmp" : "wpa-psk-tkip");
+}
+
 void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
-    if (buflen < RXCTRL_LEN + TAG_OFFSET)
+    if (buflen < RXCTRL_LEN + BEACON_IES)
         return;
 
     int rssi = (signed char) buf[0];
     volatile unsigned char *f = buf + RXCTRL_LEN;
+    volatile struct mac_header *h = (volatile struct mac_header *) f;
     unsigned int flen = buflen - RXCTRL_LEN;
 
-    unsigned int fc0 = f[0];
-    unsigned int type = (fc0 >> 2) & 3;
-    unsigned int subtype = (fc0 >> 4) & 0xf;
-    if (type != 0 || (subtype != 8 && subtype != 5))
+    unsigned int fc0 = h->frame_control[0];
+    unsigned int subtype = FC_SUBTYPE(fc0);
+    if (FC_TYPE(fc0) != FC_TYPE_MGMT || (subtype != MGMT_BEACON && subtype != MGMT_PROBE_RESP))
         return;
 
-    volatile unsigned char *bssid = &f[16];
+    volatile unsigned char *bssid = h->addr3;
     // a known target still falls through, so a rescan can republish its channel
     int known = bssid_known(bssid);
     if (known && !is_target_bssid(bssid))
@@ -66,34 +82,21 @@ void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
     unsigned int ssid_len = 0;
     int channel = -1;
     const char *sec = "open";
-    unsigned int off = TAG_OFFSET;
-    while (off + 2 <= flen) {
+    unsigned int off = BEACON_IES;
+    while (off + IE_HDR_LEN <= flen) {
         unsigned int tag = f[off];
         unsigned int len = f[off + 1];
-        if (off + 2 + len > flen)
+        if (off + IE_HDR_LEN + len > flen)
             break;
-        if (tag == 0) {
-            ssid = &f[off + 2];
+        if (tag == IE_SSID) {
+            ssid = &f[off + IE_HDR_LEN];
             ssid_len = len;
-        } else if (tag == 3 && len >= 1) {
-            channel = f[off + 2];
-        } else if (tag == 48 && len >= 8) {
-            unsigned int p = off + 2 + 2 + 4;
-            unsigned int pn = f[p] | (f[p + 1] << 8);
-            unsigned int pw_ccmp = 0;
-            unsigned int q = p + 2;
-            for (unsigned int k = 0; k < pn && q + 4 <= off + 2 + len; k++, q += 4)
-                if (f[q + 3] == 4) pw_ccmp = 1;
-            unsigned int an = (q + 2 <= off + 2 + len) ? (f[q] | (f[q + 1] << 8)) : 0;
-            unsigned int a = q + 2, sae = 0, psk = 0;
-            for (unsigned int k = 0; k < an && a + 4 <= off + 2 + len; k++, a += 4) {
-                if (f[a + 3] == 8) sae = 1;
-                else if (f[a + 3] == 2 || f[a + 3] == 6) psk = 1;
-            }
-            sec = sae ? (psk ? "wpa2/3-psk/sae" : "wpa3-sae")
-                      : (pw_ccmp ? "wpa2-psk-ccmp" : "wpa-psk-tkip");
+        } else if (tag == IE_DS_PARAMS && len >= 1) {
+            channel = f[off + IE_HDR_LEN];
+        } else if (tag == IE_RSN && len >= RSN_VERSION_LEN + RSN_SUITE_LEN + RSN_COUNT_LEN) {
+            sec = rsn_security(f + off, len);
         }
-        off += 2 + len;
+        off += IE_HDR_LEN + len;
     }
 
     if (is_target_bssid(bssid) && channel > 0)

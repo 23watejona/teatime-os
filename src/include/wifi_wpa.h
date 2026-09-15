@@ -28,6 +28,10 @@ enum {
 
 extern volatile int wpa_state;
 
+/* The RSN IE this station advertises: WPA2, CCMP pairwise and group, PSK. */
+#define RSN_IE_LEN 22
+extern const unsigned char rsn_ie[RSN_IE_LEN];
+
 /* Valid once wpa_state == WPA_DONE. */
 extern unsigned char wpa_tk[16];
 extern unsigned char wpa_gtk[32];
