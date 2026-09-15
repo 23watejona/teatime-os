@@ -2,6 +2,7 @@
 #include "uart.h"
 #include "rf_i2c.h"
 #include "reg_util.h"
+#include "wifi_regs.h"
 
 // rf pll sdm bytes per channel, so a crystal other than 26 mhz needs a different table
 static const unsigned char chan_lo[14][3] = {
@@ -12,32 +13,32 @@ static const unsigned char chan_lo[14][3] = {
 };
 
 static void pll_reset(void) {
-    rf_i2c_write(98, 1, 10, 166);
-    rf_i2c_write(98, 1, 10, 167);
-    rf_i2c_write(98, 1, 10, 165);
-    rf_i2c_write(99, 0,  1, 243);
-    rf_i2c_write(98, 1, 11, 192);
+    rf_i2c_write(I2C_RFPLL, 1, 10, 166);
+    rf_i2c_write(I2C_RFPLL, 1, 10, 167);
+    rf_i2c_write(I2C_RFPLL, 1, 10, 165);
+    rf_i2c_write(I2C_RFPLL_SDM, 0,  1, 243);
+    rf_i2c_write(I2C_RFPLL, 1, 11, 192);
 }
 
 static void pll_write_lo(const unsigned char *lo) {
-    rf_i2c_write(99, 0, 0, 7);
-    rf_i2c_write(99, 0, 3, lo[0]);
-    rf_i2c_write(99, 0, 4, lo[1]);
-    rf_i2c_write(99, 0, 5, lo[2]);
-    rf_i2c_write(99, 0, 0, 0x17);
+    rf_i2c_write(I2C_RFPLL_SDM, 0, 0, 7);
+    rf_i2c_write(I2C_RFPLL_SDM, 0, 3, lo[0]);
+    rf_i2c_write(I2C_RFPLL_SDM, 0, 4, lo[1]);
+    rf_i2c_write(I2C_RFPLL_SDM, 0, 5, lo[2]);
+    rf_i2c_write(I2C_RFPLL_SDM, 0, 0, 0x17);
 }
 
 static void pll_commit(void) {
-    rf_i2c_write_mask(98, 1, 0, 6, 6, 1);
-    rf_i2c_write_mask(98, 1, 0, 5, 5, 0);
-    rf_i2c_write_mask(98, 1, 0, 5, 5, 1);
-    rf_i2c_write_mask(98, 1, 0, 6, 6, 0);
+    rf_i2c_write_mask(I2C_RFPLL, 1, 0, 6, 6, 1);
+    rf_i2c_write_mask(I2C_RFPLL, 1, 0, 5, 5, 0);
+    rf_i2c_write_mask(I2C_RFPLL, 1, 0, 5, 5, 1);
+    rf_i2c_write_mask(I2C_RFPLL, 1, 0, 6, 6, 0);
 }
 
 static int pll_wait_locked(void) {
     for (unsigned int i = 0; i < 100; i++) {
         wait_us(20);
-        if (rf_i2c_read_mask(98, 1, 7, 7, 7))
+        if (rf_i2c_read_mask(I2C_RFPLL, 1, 7, 7, 7))
             return 1;
     }
     return 0;
@@ -52,7 +53,7 @@ void wifi_set_channel(unsigned int ch) {
     if (ch < 1 || ch > 14)
         return;
     g_wifi_channel = ch;
-    WRITE_REG_MASK(0x600005c8, 0x00f00000);
+    WRITE_REG_MASK(RFPLL_CTRL, RFPLL_LATCH);
     // a missed lock leaves the lo off, so retry
     for (int try = 0; try < 8; try++) {
         pll_reset();
@@ -63,7 +64,7 @@ void wifi_set_channel(unsigned int ch) {
         if (try == 7)
             kprintf_uart("wifi: rfpll cal timeout\n");
     }
-    WRITE_REG_UNMASK(0x600005c8, 0x00f00000);
+    WRITE_REG_UNMASK(RFPLL_CTRL, RFPLL_LATCH);
 
     // v is round(2^19 * 100 / f_mhz), the reciprocal-frequency constant
     static const unsigned short freq_mhz[14] = {
@@ -72,9 +73,9 @@ void wifi_set_channel(unsigned int ch) {
     };
     unsigned int f = freq_mhz[ch - 1];
     unsigned int v = ((52428800u + f / 2u) / f) & 0x7fff;
-    WRITE_REG_RMW(0x60009b14, 0x00001fff, 0x6000 | (v << 17));
+    WRITE_REG_RMW(BB_CHAN_FREQ, 0x00001fff, 0x6000 | (v << 17));
 
     // the rf handshake isn't up at boot, so the rx compensation only applies on later channel changes
-    if (READ_REG(0x3ff20c70) & 2)
+    if (READ_REG(MAC_PHY_CTRL) & MAC_PHY_RF_UP)
         rx_max_gain_digital(ch, 0);
 }

@@ -2,11 +2,12 @@
 #include "rf_i2c.h"
 #include "wait.h"
 #include "uart.h"
+#include "wifi_regs.h"
 #include "wifi_rxgain.h"
 
 extern void pbus_debug_mode(void);
 extern void pbus_work_mode(void);
-extern void pbus_force(unsigned int a, unsigned int b, unsigned int c);
+extern void pbus_force(unsigned int reg, unsigned int width, unsigned int val);
 extern void pbus_tx_power_off(void);
 extern void agc_disable(void);
 
@@ -17,7 +18,7 @@ unsigned int pbus_rd(unsigned int reg, unsigned int width) {
     width &= 0xff;
     unsigned int w = (width == 4u) ? 2u : ((width - 1u) & 0xff);
     unsigned int slot = (w + base_off[reg & 7]) & 0xff;
-    unsigned int word = READ_REG(0x600005a4 + (slot / 3u) * 4u);
+    unsigned int word = READ_REG(PBUS_READ_WINDOW + (slot / 3u) * 4u);
     unsigned int shift = (slot == 12u) ? 0u : ((slot % 3u) * (unsigned int)(-9) + 0x12u);
     return (word >> (shift & 0x1f)) & 0x1ff;
 }
@@ -176,14 +177,14 @@ static void rx_gain_table_load(unsigned int do_iq, unsigned int *dc_table,
     count &= 0xff;
 
     // the guard and window writes must precede pbus debug mode
-    WRITE_REG_MASK(0x600005c8, 0x00030000);
-    WRITE_REG(0x60009a68, 0x000001e0);
+    WRITE_REG_MASK(RFPLL_CTRL, 0x00030000);
+    WRITE_REG(BB_RX_GAIN_WINDOW, 0x000001e0);
     pbus_debug_mode();
 
-    unsigned int saved_12 = rf_i2c_read_mask(0x77, 0, 0x12, 7, 0);
-    unsigned int saved_18 = rf_i2c_read_mask(0x77, 0, 0x18, 5, 5) ? 1u : 0u;
-    rf_i2c_write_mask(0x77, 0, 0x18, 5, 5, 0);
-    rf_i2c_write_mask(0x77, 0, 0x12, 7, 0, 0);
+    unsigned int saved_12 = rf_i2c_read_mask(I2C_BB, 0, 0x12, 7, 0);
+    unsigned int saved_18 = rf_i2c_read_mask(I2C_BB, 0, 0x18, 5, 5) ? 1u : 0u;
+    rf_i2c_write_mask(I2C_BB, 0, 0x18, 5, 5, 0);
+    rf_i2c_write_mask(I2C_BB, 0, 0x12, 7, 0, 0);
 
     // pbus_dco can't converge here because the loop is open, so fixed gain_hi and gain_lo tables stand in for measuring
     static const unsigned int gain_hi_tab[60] = {
@@ -212,10 +213,10 @@ static void rx_gain_table_load(unsigned int do_iq, unsigned int *dc_table,
     for (unsigned int k = 40; k < 0x40; k++)
         gain_lo[k] = 0;
 
-    rf_i2c_write_mask(0x77, 0, 0x18, 5, 5, saved_18);
-    rf_i2c_write_mask(0x77, 0, 0x12, 7, 0, saved_12);
+    rf_i2c_write_mask(I2C_BB, 0, 0x18, 5, 5, saved_18);
+    rf_i2c_write_mask(I2C_BB, 0, 0x12, 7, 0, saved_12);
 
-    WRITE_REG_UNMASK(0x600005c8, 0x00030000);
+    WRITE_REG_UNMASK(RFPLL_CTRL, 0x00030000);
     pbus_tx_power_off();
     // bit0 brings the tx path up alongside rx but leaves the pa gain off, so the mac keys the pa per burst; continuous drive saturates rx
     pbus_force(2, 1, 0x185);
@@ -245,12 +246,12 @@ static void rx_gain_table_load(unsigned int do_iq, unsigned int *dc_table,
         unsigned int bb_step = bb_step_sp[bits];
 
         volatile unsigned int *slot =
-            (volatile unsigned int *)((n + 0x18002780u) * 4u);
+            (volatile unsigned int *)(BB_RX_GAIN_TABLE + n * 4u);
 
-        WRITE_REG(0x60009a68, 0x0000001e);
+        WRITE_REG(BB_RX_GAIN_WINDOW, 0x0000001e);
         *slot = (((lo >> 9) & 0x1ff) * 0x100) + (raw * 0x20000) + ((lo & 0x1ff) >> 1);
         n++;
-        WRITE_REG(0x60009a68, 0x000001e0);
+        WRITE_REG(BB_RX_GAIN_WINDOW, 0x000001e0);
         *slot = ((bb_step & 0x7ff) * 4) +
                 (((hi >> 9) & 0x1ff) * 0x400000) + (lo * 0x80000000u) +
                 ((hi & 0x1ff) * 0x2000);
@@ -276,7 +277,7 @@ void rx_gain_init(unsigned int rxmax) {
 
     rx_gain_table_load(1, (unsigned int *)dc_table, rx_max_gain + 1u);
 
-    rf_i2c_write(0x77, 0, 0x12, 0xe8);
+    rf_i2c_write(I2C_BB, 0, 0x12, 0xe8);
 
     WRITE_REG_MASK(0x60009860, 1);
 
@@ -285,15 +286,15 @@ void rx_gain_init(unsigned int rxmax) {
     if (rxmax == 0)
         rx_max_gain = 0x46;
 
-    WRITE_REG_RMW(0x60009b48, 0xffffff80, rx_max_gain);
+    WRITE_REG_RMW(BB_RX_MAX_GAIN, 0xffffff80, rx_max_gain);
 }
 
 void rx_filter_select(int sel) {
-    WRITE_REG_UNMASK(0x60009c04, ~0xffffcfefu & 0xffffffffu);
+    WRITE_REG_UNMASK(BB_RX_FILTER, ~0xffffcfefu & 0xffffffffu);
     if (sel == 1)
-        WRITE_REG_MASK(0x60009c04, 0x10);
+        WRITE_REG_MASK(BB_RX_FILTER, 0x10);
     else if (sel == 2)
-        WRITE_REG_MASK(0x60009c04, 0x1000);
+        WRITE_REG_MASK(BB_RX_FILTER, 0x1000);
     else if (sel == 3)
-        WRITE_REG_MASK(0x60009c04, 0x2000);
+        WRITE_REG_MASK(BB_RX_FILTER, 0x2000);
 }
