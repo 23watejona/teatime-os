@@ -22,6 +22,7 @@ struct udp_slot {
 struct udp_bind {
     int used;
     unsigned short port;
+    unsigned int timeout;
     struct dev *dev;
     struct udp_slot ring[UDP_RING_SLOTS];
     unsigned int head;
@@ -35,6 +36,7 @@ static int udp_mutex;
 static int udp_open(struct dev *d, int arg) {
     struct udp_bind *b = d->state;
     b->port = 0;
+    b->timeout = 0;
     b->head = 0;
     b->tail = 0;
     b->used = 1;
@@ -49,6 +51,10 @@ static int udp_close(struct dev *d) {
 
 static int udp_control(struct dev *d, int op, int arg) {
     struct udp_bind *b = d->state;
+    if (op == UDP_TIMEOUT) {
+        b->timeout = arg;
+        return 0;
+    }
     if (op != UDP_BIND)
         return -1;
     for (int i = 0; i < MAX_BINDS; i++)
@@ -64,8 +70,14 @@ static int udp_read(struct dev *d, void *buf, unsigned int n) {
     if (n < sizeof(*dg))
         return -1;
     mutex_lock(udp_mutex);
-    while (b->head == b->tail)
-        cond_wait(b->dev->cond, udp_mutex);
+    while (b->head == b->tail) {
+        if (!b->timeout) {
+            cond_wait(b->dev->cond, udp_mutex);
+        } else if (cond_timedwait(b->dev->cond, udp_mutex, b->timeout) < 0) {
+            mutex_unlock(udp_mutex);
+            return -1;
+        }
+    }
     struct udp_slot *slot = &b->ring[b->tail & (UDP_RING_SLOTS - 1)];
     unsigned int len = slot->len;
     if (len > n - sizeof(*dg))

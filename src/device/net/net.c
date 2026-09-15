@@ -78,6 +78,10 @@ static void arp_cache_store(struct ipv4_addr ip, const u8 *mac) {
 }
 
 static int arp_cache_lookup(struct ipv4_addr ip, u8 *mac) {
+    if (ip.word == IPV4_BROADCAST) {
+        memcpy(mac, bcast, 6);
+        return 0;
+    }
     for (int i = 0; i < arp_cache_next; i++) {
         if (arp_cache[i].ip.word == ip.word) {
             memcpy(mac, arp_cache[i].mac, 6);
@@ -167,7 +171,7 @@ int net_send(struct ipv4_addr dst, unsigned char *pkt, unsigned int len) {
 
     memmove(pkt + LLC_SNAP_LEN, pkt, len);
     put_snap(pkt, ETHERTYPE_IPV4);
-    struct ipv4_addr next = ON_SUBNET(dst) ? dst : gw_ip;
+    struct ipv4_addr next = (ON_SUBNET(dst) || dst.word == IPV4_BROADCAST) ? dst : gw_ip;
 
     u8 mac[6];
     unsigned int tries = 0;

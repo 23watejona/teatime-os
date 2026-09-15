@@ -72,7 +72,8 @@ static void ipv4_recv(u8 *buf, unsigned int len, const u8 *sa) {
                 tcp_recv(src, payload, payload_len);
             break;
         case IPPROTO_UDP:
-            if (to_us && payload_len >= sizeof(union udp_header))
+            // dhcp replies arrive before we own an address, so udp is filtered by port only
+            if (payload_len >= sizeof(union udp_header))
                 udp_recv(src, dst, payload, payload_len);
             break;
     }

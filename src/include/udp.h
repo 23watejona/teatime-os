@@ -3,8 +3,10 @@
 
 #include "ipv4.h"
 
-/* control op on a "udp" descriptor: arg = local port */
+/* control ops on a "udp" descriptor: UDP_BIND arg = local port;
+   UDP_TIMEOUT arg = ticks a read waits before returning -1, 0 waits forever */
 #define UDP_BIND 1
+#define UDP_TIMEOUT 2
 #define UDP_DATAGRAM_MAX 512
 
 /* read and write both move one of these. On read addr/port are the sender
