@@ -2,6 +2,7 @@
 #include "wifi_regs.h"
 #include "uart.h"
 #include "string.h"
+#include "wifi_frame.h"
 #include "wifi_tx.h"
 #include "wifi_wpa.h"
 #include "wifi_crypto.h"
@@ -57,7 +58,7 @@ struct ccmp_frame {
 } __attribute__((packed));
 
 int wifi_ccmp_tx(const unsigned char *da, const unsigned char *payload, unsigned int len) {
-    u8 f[1600];
+    u8 f[MAX_FRAME_LEN];
     struct ccmp_frame *frame = (struct ccmp_frame *)f;
     unsigned int frame_len = sizeof(*frame) + len + CCMP_MIC_LEN;
     if (frame_len > sizeof(f))
@@ -75,32 +76,32 @@ int wifi_ccmp_tx(const unsigned char *da, const unsigned char *payload, unsigned
 }
 
 int wifi_ccmp_rx(volatile unsigned char *buf, unsigned int len, unsigned char *out) {
-    if (len < 12 + 24)
+    if (len < RXCTRL_LEN + MAC_HDR_LEN)
         return -1;
-    volatile u8 *f = buf + 12;
+    volatile u8 *f = buf + RXCTRL_LEN;
+    volatile struct mac_header *h = (volatile struct mac_header *)f;
     // the dma descriptor length undercounts the frame, so the real 802.11 length comes from the rxcontrol header: word0 bits 16-27 for legacy rates, word1 bits 8-23 when the ht flag in word0 bits 14-15 is set
     unsigned int w0 = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
     unsigned int w1 = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
     unsigned int flen = (w0 & 0xc000) ? ((w1 >> 8) & 0xffff) : ((w0 >> 16) & 0xfff);
-    if (flen < 36 || flen > 1600)
+    if (flen > MAX_FRAME_LEN)
         return -1;
 
-    unsigned int fc0 = f[0], fc1 = f[1];
-    if (((fc0 >> 2) & 3) != 2)
+    unsigned int fc0 = h->frame_control[0];
+    if (FC_TYPE(fc0) != FC_TYPE_DATA)
         return -1;
     for (int i = 0; i < 6; i++)
-        if (f[10 + i] != ap_bssid[i])
+        if (h->addr2[i] != ap_bssid[i])
             return -1;
-    if (!(fc1 & 0x40))
+    if (!(h->frame_control[1] & FC_PROTECTED))
         return -1;
 
-    unsigned int subtype = (fc0 >> 4) & 0xf;
-    unsigned int mh = (subtype & 8) ? 26 : 24;
-
-    unsigned int hdr = mh + 8;
-    if (flen <= hdr + 8)
+    unsigned int hdr = MAC_HDR_LEN + CCMP_HDR_LEN;
+    if (FC_SUBTYPE(fc0) & SUBTYPE_QOS)
+        hdr += QOS_CTRL_LEN;
+    if (flen <= hdr + CCMP_MIC_LEN)
         return -1;
-    unsigned int plen = flen - hdr - 8;
+    unsigned int plen = flen - hdr - CCMP_MIC_LEN;
     if (plen > 2048)
         plen = 2048;
     memcpy(out, (const void *)(f + hdr), plen);

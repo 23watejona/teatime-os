@@ -4,7 +4,9 @@
 #include "proc.h"
 #include "timer.h"
 #include "wifi_dma.h"
+#include "wifi_frame.h"
 #include "wifi_tx.h"
+#include "string.h"
 
 // tx is a per-queue mmio block rather than a descriptor ring: the rate, duration, lifetime, length and descriptor words are armed first and the go bits set last, so the queue never launches a half-written frame; completion is MAC_INT_TX_DONE in MAC_INT_EVENT
 
@@ -25,7 +27,7 @@ extern unsigned char wifi_mac_addr[6];
 extern volatile unsigned int wifi_fiq_tx_count;
 
 static struct lldesc tx_desc __attribute__((aligned(4)));
-static unsigned char tx_buf[1600] __attribute__((aligned(4)));
+static unsigned char tx_buf[MAX_FRAME_LEN] __attribute__((aligned(4)));
 // guards descriptor_busy, tx_desc, tx_buf, tx_seq and the packet number
 static int descriptor_mutex;
 static int descriptor_busy; // set while tx_desc and tx_buf belong to a launched frame
@@ -141,17 +143,26 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
 
 extern unsigned char ap_bssid[6];
 
+static const unsigned char basic_rates[] = {
+    RATE_BASIC | RATE_KBPS(1000), RATE_BASIC | RATE_KBPS(2000),
+    RATE_BASIC | RATE_KBPS(5500), RATE_BASIC | RATE_KBPS(11000),
+};
+
 static unsigned int build_probe_req(unsigned char *b) {
-    unsigned int n = 0;
-    b[n++] = 0x40; b[n++] = 0x00;
-    b[n++] = 0x00; b[n++] = 0x00;
-    for (int i = 0; i < 6; i++) b[n++] = ap_bssid[i];
-    for (int i = 0; i < 6; i++) b[n++] = wifi_mac_addr[i];
-    for (int i = 0; i < 6; i++) b[n++] = ap_bssid[i];
-    b[n++] = 0x00; b[n++] = 0x00;
-    b[n++] = 0x00; b[n++] = 0x00;
-    b[n++] = 0x01; b[n++] = 0x04;
-    b[n++] = 0x82; b[n++] = 0x84; b[n++] = 0x8b; b[n++] = 0x96;
+    struct mac_header *mac = (struct mac_header *)b;
+    memset(mac, 0, sizeof(*mac));
+    mac->frame_control[0] = MGMT_PROBE_REQ << FC_SUBTYPE_SHIFT;
+    memcpy(mac->addr1, ap_bssid, 6);
+    memcpy(mac->addr2, wifi_mac_addr, 6);
+    memcpy(mac->addr3, ap_bssid, 6);
+    unsigned int n = sizeof(*mac);
+
+    b[n++] = IE_SSID;
+    b[n++] = 0;
+    b[n++] = IE_SUPPORTED_RATES;
+    b[n++] = sizeof(basic_rates);
+    memcpy(b + n, basic_rates, sizeof(basic_rates));
+    n += sizeof(basic_rates);
     return n;
 }
 
