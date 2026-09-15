@@ -1,4 +1,5 @@
 #include "reg_util.h"
+#include "wifi_regs.h"
 
 extern void kprintf_uart(const char *, ...);
 
@@ -15,23 +16,23 @@ static unsigned char crc8(const unsigned char *p, unsigned int len) {
 }
 
 void init_wifi_mac_addr(void) {
-    unsigned int r1 = READ_REG(0x3ff00050);
-    unsigned int r2 = READ_REG(0x3ff00054);
-    unsigned int r3 = READ_REG(0x3ff00058);
-    unsigned int r4 = READ_REG(0x3ff0005c);
+    unsigned int data0 = READ_REG(EFUSE_DATA0_REG);
+    unsigned int data1 = READ_REG(EFUSE_DATA1_REG);
+    unsigned int data2 = READ_REG(EFUSE_DATA2_REG);
+    unsigned int data3 = READ_REG(EFUSE_DATA3_REG);
 
     unsigned char mac[6];
-    mac[3] = (r2 >> 8) & 0xff;
-    mac[4] = r2 & 0xff;
-    mac[5] = (r1 >> 24) & 0xff;
+    mac[3] = (data1 >> 8) & 0xff;
+    mac[4] = data1 & 0xff;
+    mac[5] = (data0 >> 24) & 0xff;
 
     int valid = 0;
-    if (r3 & (1 << 12)) {
-        mac[0] = (r4 >> 16) & 0xff;
-        mac[1] = (r4 >> 8) & 0xff;
-        mac[2] = r4 & 0xff;
+    if (data2 & EFUSE_IS_48BITS_MAC) {
+        mac[0] = (data3 >> 16) & 0xff;
+        mac[1] = (data3 >> 8) & 0xff;
+        mac[2] = data3 & 0xff;
         unsigned char check[3] = { mac[2], mac[1], mac[0] };
-        if (crc8(check, 3) == ((r3 >> 24) & 0xff))
+        if (crc8(check, 3) == (data2 >> 24))
             valid = 1;
     }
     if (!valid) {
@@ -51,6 +52,6 @@ void init_wifi_mac_addr(void) {
 
     unsigned int lo = mac[0] | (mac[1] << 8) | (mac[2] << 16) | (mac[3] << 24);
     unsigned int hi = mac[4] | (mac[5] << 8);
-    WRITE_REG(0x3ff20c48, lo);
-    WRITE_REG(0x3ff20c4c, hi);
+    WRITE_REG(MAC_ADDR_LO(0), lo);
+    WRITE_REG(MAC_ADDR_HI(0), hi);
 }
