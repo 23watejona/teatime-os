@@ -8,6 +8,7 @@ extern void pbus_force(unsigned int reg, unsigned int width, unsigned int val);
 extern void rx_max_gain_digital(unsigned int ch, int level);
 extern unsigned int g_wifi_channel;
 
+// digital rx baseband: agc, noise-floor and cca thresholds, the rx gain ceiling and the detector windows; these are the known-working values, none of them has been tuned here
 void init_wifi_bb(void) {
     WRITE_REG_MASK(BB_RX_CTRL, 0x00001400);
     WRITE_REG_MASK(0x60009b0c, 0x10000000);
@@ -38,11 +39,13 @@ void init_wifi_bb(void) {
     WRITE_REG_RMW(0x60009d4c, 0xfc000000, 0x03fe0124);
     WRITE_REG_RMW(0x60009d20, 0x0fffffff, 0xb0000000);
     WRITE_REG_MASK(0x60009988, 0x04000000);
+    // the mac side of the phy interface, so the rx path reports to the mac with the right framing
     WRITE_REG_RMW(MAC_PHY_CTRL, 0xff0bffff, 0x00240000);
     WRITE_REG_UNMASK(0x60009d44, 0x00400000);
 
     rx_max_gain_digital(g_wifi_channel, 0);
 
+    // rx front-end enables and the 11b path, then the rx gain table is loaded with the pbus in debug mode
     WRITE_REG_RMW(0x60009c28, 0xfffe03ff, 0);
     WRITE_REG_RMW(0x60009d24, 0xffffff01, 0);
 

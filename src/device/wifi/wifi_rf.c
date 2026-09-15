@@ -14,6 +14,7 @@ void tx_rf_enable(void);
 unsigned int rx_digital_stop(void);
 void rx_digital_start(unsigned int dig_rx_saved);
 
+// the lna and vga gain caps are derived from an analog readback, so they track the individual part
 static void rx_max_gain_analog(void) {
     int d = rf_i2c_read(I2C_RFPLL, 1, 5);
 
@@ -34,6 +35,7 @@ static void rx_analog_init(void) {
     rx_max_gain_analog();
 }
 
+// takes the rx analog out of cal mode and pushes a starting gain through the latch, so the agc begins from a known point
 void rx_path_enable(void) {
     WRITE_REG_RMW(RF_CAL_MODE, 0xfe7fffff, 0);
     wait_us(5);
@@ -46,6 +48,7 @@ void dpd_bypass(void) {
     rf_i2c_write_mask(I2C_BB, 0, 15, 1, 1, 1);
 }
 
+// rf power-down in dependency order: pbus, cal mode, pll, the mac handshake, wifi clocks, then the rf power domain
 void rf_off(void) {
     WRITE_REG_RMW(PBUS_CTRL, 0xff0fffff, 0);
     WRITE_REG_RMW(PBUS_CTRL, 0x03ffffff, 0);
@@ -58,6 +61,7 @@ void rf_off(void) {
     rtc.rf_pwr = 0x50000000;
 }
 
+// brings the rx side of the pbus up while the rf stays in cal mode, so the analog can be programmed before it runs
 void rx_pbus_on(void) {
     WRITE_REG_RMW(PBUS_CTRL, 0xff0fffff, 0x00300000);
     WRITE_REG_RMW(PBUS_CTRL, 0x03ffffff, 0xd8000000);
@@ -66,7 +70,9 @@ void rx_pbus_on(void) {
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x01800000);
 }
 
+// rf power-up from cold, the reverse of rf_off: clocks and power domains, pll, per-block analog defaults, channel, rx gains, then the mac handshake and a baseband reset
 void wifi_rf_on(void) {
+    // wifi clock source and enables, and the mac's phy interface, before anything analog is touched
     WRITE_REG_RMW(BBPLL_CTRL, 0xfffffff3, 0x00000004);
     WRITE_REG_MASK(DPORT_CLK_EN, DPORT_WIFI_CLK_EN);
     WRITE_REG_MASK(DPORT_CLK_EN, 0x038f0000);
@@ -75,6 +81,7 @@ void wifi_rf_on(void) {
 
     WRITE_REG_UNMASK(MAC_PHY_CTRL, MAC_PHY_RF_UP);
 
+    // pll block powered and reset, then every rf power domain on
     rx_pbus_on();
     rf_i2c_write(I2C_RFPLL, 1, 3, 0xf1);
     rf_i2c_write(I2C_RFPLL, 1, 11, 0x80);
@@ -87,6 +94,7 @@ void wifi_rf_on(void) {
     rf_i2c_write(101, 4, 0, 0xc6);
     rf_i2c_write_mask(I2C_SAR, 2, 0, 0, 0, 1);
 
+    // analog block defaults need the pll locked on a channel before the rx gains are derived
     WRITE_REG_MASK(DPORT_CLK_EN, 0xffff0000);
     rtc.rf_pwr = 0xfe000000;
     rf_regs_init();
@@ -94,6 +102,7 @@ void wifi_rf_on(void) {
     rf_i2c_write(97, 1, 7, 0x51);
     rx_analog_init();
 
+    // handshake up and the digital rx reset, so the baseband restarts against the freshly configured analog
     rx_pbus_on();
     WRITE_REG_MASK(MAC_PHY_CTRL, MAC_PHY_RF_UP);
 
@@ -113,6 +122,7 @@ void wifi_rf_on(void) {
     rx_digital_start(dig);
 }
 
+// measures the on-chip rc time constant and writes matching filter trims, so the baseband filter corners land on their design bandwidth despite process spread
 void rc_calibrate(void) {
     kprintf_uart("      rc:w1\n");
     rf_i2c_write_mask(106, 2, 0, 5, 4, 0);
@@ -138,12 +148,14 @@ void rc_calibrate(void) {
     rf_i2c_write(102, 3, 1, (rc_b | 0x40) & 0xff);
 }
 
+// the sar adc measures tx dc offset and power, so it comes up with the rf
 static void sar_init(void) {
     rtc.rf_pwr |= 0x02000000;
     rf_i2c_write_mask(I2C_SAR, 2, 0, 4, 4, 1);
     rf_i2c_write_mask(I2C_SAR, 2, 1, 1, 0, 2);
 }
 
+// tx chain analog block defaults
 static void tx_regs_init(void) {
     rf_i2c_write(I2C_TX, 2, 1, 104);
     rf_i2c_write(I2C_TX, 2, 2, 15);
@@ -158,6 +170,7 @@ static void tx_regs_init(void) {
     rf_i2c_write(I2C_TX, 2, 11, 7);
 }
 
+// bias, tx chain, rx gain, sar and pll defaults for every analog block, in the order the blocks depend on each other
 void rf_regs_init(void) {
     rf_i2c_write(106, 2, 0, 37);
     tx_regs_init();
@@ -173,6 +186,7 @@ void rf_regs_init(void) {
     WRITE_REG_RMW(BBPLL_CTRL, 0xfffff9ff, 0x400);
 }
 
+// a force-write drives one pbus register directly, so the baseband's own control of it is overridden until pbus_work_mode
 void pbus_force(unsigned int reg, unsigned int width, unsigned int val) {
     unsigned int v = (READ_REG(PBUS_CTRL) & 0xffff0001) | PBUS_FORCE_STROBE;
     v |= (reg & 0xff) << PBUS_FORCE_REG_SHIFT;
@@ -185,12 +199,14 @@ void pbus_force(unsigned int reg, unsigned int width, unsigned int val) {
     WRITE_REG_UNMASK(PBUS_CTRL, PBUS_FORCE_STROBE);
 }
 
+// tx gains to their floor, so the rx side can be calibrated without the transmitter leaking into it
 void pbus_tx_power_off(void) {
     pbus_force(6, 1, 0);
     pbus_force(1, 1, 12);
     pbus_force(2, 1, 128);
 }
 
+// zero baseband attenuation in every rate slot, so the tx level is set by the rf gain alone
 #define TX_BB_ATTEN 0
 static void tx_bb_atten_max(void) {
     for (unsigned int i = 0; i < RF_TXPWR_REGS; i++) {
@@ -232,6 +248,7 @@ void pbus_debug_mode(void) {
     }
 }
 
+// per-channel rx gain trim, one step more on the upper channels and six more at the extended gain level
 void rx_chan_compensate(unsigned int ch, int level) {
     int base = (ch >= 11 && ch <= 13) ? -6 : -7;
     int ext = (level == 1) ? -6 : 0;
@@ -249,15 +266,18 @@ void rx_max_gain_digital(unsigned int ch, int level) {
     rx_chan_compensate(ch, level);
 }
 
+// first-ever rf init: the rf power domains come up one group at a time with the mac handshake down, then the analog is programmed through the pbus and the pll put on channel 1
 void rf_init(void) {
     WRITE_REG_MASK(DPORT_CLK_EN, 0xffff0000);
 
+    // rtc pll timing and the first rf power domains, with the rf held in cal mode
     rtc.pll_ctrl = 0x0019c06a;
     rtc.rf_pwr = 0xf0000000;
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x01800000);
     WRITE_REG_UNMASK(RF_CAL_MODE, 0x08000000);
     rtc.rf_pwr |= 0x02000000;
 
+    // pbus timing before the last domains, so the bus is stable when the analog blocks wake
     rtc.rf_pwr |= 0x30000000;
     WRITE_REG_RMW(PBUS_STATUS, 0xe0ffffff, 0x1c000000);
     WRITE_REG_RMW(PBUS_CFG, 0xcfffffff, 0x10000000);
@@ -265,6 +285,7 @@ void rf_init(void) {
     wait_us(2);
     rtc.rf_pwr |= 0x0c000000;
 
+    // tx path enabled but at zero gain for the rest of bring-up
     pbus_debug_mode();
     pbus_force(2, 1, 129);
     pbus_tx_power_off();
@@ -309,6 +330,7 @@ static int dc_clamp_s8(int v) {
     return v;
 }
 
+// binary search on the i and q dc codes: the mac's cal engine only reports the sign of the residual, so each step halves and the last four codes are averaged
 static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
     int acc_i = 0, acc_q = 0;
     int code_i = 64, code_q = 64;
@@ -370,6 +392,7 @@ static unsigned int tx_gain_to_dc_index(unsigned int gain) {
 // the tx gain hasn't been written yet at this point, so the dc offset is calibrated against its power-on default
 #define TX_RF_ANA_GAIN 0x0bf0u
 
+// nulls the tx carrier leak: the offset is measured at four rf gains and the pair for the gain in use goes into every rate slot
 static void tx_dc_offset_calibrate(void) {
     static const unsigned char gain_tbl[4] = {0x04, 0x10, 0x12, 0x14};
     signed char pairs[4][2];
@@ -444,6 +467,7 @@ static int noise_floor_measure(unsigned int chan) {
     return 1;
 }
 
+// measures the noise floor four times on channel 1 with the rx loop forced open and keeps the lowest, so the cca threshold sits just above the real floor of this board
 static void noise_init(void) {
     noise_floor_set(-388);
     WRITE_REG_RMW(BB_RX_GAIN_FORCE, 0xfffffc00, 201);
@@ -490,6 +514,7 @@ int live_rssi(void) {
     return v >> 1;
 }
 
+// baseband bring-up in the order the steps depend on each other: pbus, rc cal, tx dc cal, rx baseband config, noise floor, then predistortion bypassed
 void bb_bringup(void) {
     rf_i2c_write(97, 1, 7, 81);
     init_wifi_pbus();
@@ -516,6 +541,7 @@ void antenna_switch_init(void) {
     WRITE_REG(BB_TX_CAL, 2);
 }
 
+// relocks the baseband pll with the cpu double clock held off, so the cpu clock doesn't glitch while the pll is out
 void bbpll_calibrate(unsigned int slow) {
     unsigned int saved = READ_REG(DPORT_CTL_REG);
     WRITE_REG(DPORT_CTL_REG, saved & ~DPORT_CTL_DOUBLE_CLK);
@@ -527,6 +553,7 @@ void bbpll_calibrate(unsigned int slow) {
     WRITE_REG(DPORT_CTL_REG, saved);
 }
 
+// freezes the digital rx while the analog is changed, so a half-configured path can't latch a bad gain
 unsigned int rx_digital_stop(void) {
     unsigned int saved = READ_REG(BB_DIG_RX);
     WRITE_REG_MASK(BB_SLEEP, BB_SLEEP_RX);

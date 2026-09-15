@@ -120,6 +120,7 @@ static void rx_gain_table_load(unsigned int *table, unsigned int count) {
     pbus_force(3, 2, 6);
     pbus_work_mode();
 
+    // each gain step is two table words behind a window select: the analog gain code and dc offsets, then the baseband step and the high-gain half
     for (unsigned int n = 0; n < count; ) {
         unsigned int raw = (n & 1) ? gain_lo[n >> 1] >> 16 : gain_lo[n >> 1] & 0xffff;
 
@@ -147,6 +148,7 @@ static void rx_gain_table_load(unsigned int *table, unsigned int count) {
     }
 }
 
+// builds the rx gain ladder the agc steps through and loads it into the baseband's table ram, then caps the agc at the highest usable step
 void rx_gain_init(unsigned int rxmax) {
     static unsigned int table[0x80];
 

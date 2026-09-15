@@ -7,6 +7,7 @@ extern void init_wifi_dma(void);
 extern void wifi_rf_on(void);
 extern void rf_off(void);
 
+// mac feature options, the phy interface config, the two mac clock dividers and the mac enable bits
 static void mac_options_init(void) {
     WRITE_REG_MASK(MAC_RX_OPTION, 0x8084a000);
     WRITE_REG_RMW(MAC_RX_OPTION, 0xffdfbff7, 0);
@@ -22,6 +23,7 @@ static void mac_options_init(void) {
     WRITE_REG_MASK(MAC_CTRL, 0x40000000);
 }
 
+// two placeholder slots with a broadcast address and an all-ones key, so the crypto engine has valid entries before any real key is installed
 static void key_table_init(void) {
     WRITE_REG(MAC_KEY_ADDR(0), 0xffffffff);
     WRITE_REG(MAC_KEY_FLAGS(0), 0x00ccffff);
@@ -35,6 +37,7 @@ static void key_table_init(void) {
     WRITE_REG_MASK(MAC_KEY_ENABLE, 1 << 1);
 }
 
+// mac init: interrupts off and cleared, crypto off, placeholder keys, the rx dma ring, the rate map and rx filter, then the interrupt set we service; tx stays disabled until the rf is up
 void init_wifi_mac(void) {
     WRITE_REG(MAC_INT_ENABLE, 0);
     WRITE_REG(MAC_INT_CLEAR, 0xffffffff);
@@ -57,6 +60,7 @@ void init_wifi_mac(void) {
     WRITE_REG_UNMASK(MAC_TX_CTRL, MAC_TX_ENABLE);
 }
 
+// every address byte masked on unit 0 and the promiscuous filter bits set, so the scan hears every frame on the channel
 static void mac_filter_accept_all(void) {
     WRITE_REG(MAC_ADDR_LO(0), 0xffffffff);
     WRITE_REG(MAC_ADDR_HI(0), 0x0000ffff);
@@ -74,6 +78,7 @@ void wifi_mac_rx_enable(void) {
     wait_us(2000);
     wifi_rf_on();
 
+    // promiscuous bits back off but unit 0 left wide open, so beacons from every ap still arrive while the crypto path delivers protected frames
     mac_filter_accept_all();
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00000001);
     WRITE_REG_UNMASK(MAC_RX_FILTER, 0x00000002);
@@ -98,6 +103,7 @@ void wifi_mac_rx_enable(void) {
 
     WRITE_REG_MASK(MAC_TX_CTRL, MAC_TX_ENABLE);
 
+    // tx i/q calibration, tx gain per rate slot, sar adc timing and the bbpll trims, so the transmitter radiates; these are the known-working values, none of them has been tuned here
     WRITE_REG(0x6000983c, 0x00000012);
     WRITE_REG(0x60009860, 0x02230001);
     WRITE_REG_UNMASK(0x60009864, 0x00000100);

@@ -4,6 +4,7 @@
 
 extern int init_cpu_clk(unsigned int clk_rate_mhz);
 
+// wifi clock enable, rtc sleep and crystal timing, then the analog trims cleared, so the rf later comes up from a defined rtc state
 void init_wifi_clk(void) {
     WRITE_REG_MASK(DPORT_CLK_EN, DPORT_WIFI_CLK_EN);
 
@@ -15,6 +16,7 @@ void init_wifi_clk(void) {
     rtc.pwr = 0x00046046;
     rtc.slp_val = rtc.slp_cnt_val + 1000;
 
+    // the crystal takes time to report ready, so this is polled rather than assumed
     rtc.analog_0 |= DPORT_WIFI_CLK_EN;
     for (unsigned int t = 0; (rtc.status & 0x3) == 0 && t < 100000u; t++)
         ;
