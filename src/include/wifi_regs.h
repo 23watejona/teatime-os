@@ -5,11 +5,73 @@
 #define DPORT_CTL_DOUBLE_CLK 0x00000001
 #define DPORT_CLK_EN         0x3ff00018
 #define DPORT_WIFI_CLK_EN    0x00100000
+#define EFUSE_DATA0_REG      0x3ff00050
+#define EFUSE_DATA1_REG      0x3ff00054
 #define EFUSE_DATA2_REG      0x3ff00058
+#define EFUSE_DATA3_REG      0x3ff0005c
+#define EFUSE_IS_48BITS_MAC  (1 << 12)
+
+#define PERIPHS_IO_MUX_MTCK_U  0x60000808
+#define PERIPHS_IO_MUX_MTMS_U  0x6000080c
+#define PERIPHS_IO_MUX_GPIO0_U 0x60000834
+
+#define MAC_DMA_RX_CTRL             0x3ff20000
+#define MAC_TX_CTRL                 0x3ff20004
+#define MAC_TX_ENABLE               0x80000000
+#define MAC_DMA_RX_HEAD             0x3ff20008
+#define MAC_DMA_RX_CTRL_HEAD        0x3ff2000c
+#define MAC_DMA_RX_CURRENT          0x3ff2001c
+#define MAC_RX_FILTER               0x3ff2006c
+#define MAC_DMA_RX_WINDOW_END       0x3ff2007c
+#define MAC_DMA_RX_WINDOW_BASE      0x3ff20080
+#define MAC_DMA_RX_CTRL_WINDOW_END  0x3ff20084
+#define MAC_DMA_RX_CTRL_WINDOW_BASE 0x3ff20088
+
+#define MAC_CRYPTO_CIPHER    0x3ff20800
+#define MAC_CRYPTO_CONF      0x3ff20804
+#define MAC_CRYPTO_OFF       0x00030000
+#define MAC_CIPHER_CCMP      0x00030103
+#define MAC_KEY_ENABLE       0x3ff2080c
+#define MAC_KEY_SLOT(s)      (0x3ff21400 + 0x28 * (s))
+#define MAC_KEY_ADDR(s)      MAC_KEY_SLOT(s)
+#define MAC_KEY_FLAGS(s)     (MAC_KEY_SLOT(s) + 4)
+#define MAC_KEY_MATERIAL(s, w) (MAC_KEY_SLOT(s) + 8 + 4 * (w))
+#define MAC_KEY_CCMP         0x004c0000
+#define MAC_KEY_ID_SHIFT     24
 
 #define MAC_CTRL             0x3ff20c14
+#define MAC_INT_ENABLE       0x3ff20c18
+#define MAC_INT_EVENT        0x3ff20c20
+#define MAC_INT_CLEAR        0x3ff20c24
+#define MAC_INT_TX_DONE      0x00080000
+#define WDEV_INTEREST_EVENT  0x2c880300
+#define WDEV_SNIFFER_EVENT   0x0000000c
+
+// two address-match units, each with an address and a byte mask; bit 16 of the mask high word enables the unit
+#define MAC_BSSID_LO(u)      (0x3ff20c28 + 8 * (u))
+#define MAC_BSSID_HI(u)      (0x3ff20c2c + 8 * (u))
+#define MAC_BSSID_MASK_LO(u) (0x3ff20c38 + 8 * (u))
+#define MAC_BSSID_MASK_HI(u) (0x3ff20c3c + 8 * (u))
+#define MAC_ADDR_LO(u)       (0x3ff20c48 + 8 * (u))
+#define MAC_ADDR_HI(u)       (0x3ff20c4c + 8 * (u))
+#define MAC_ADDR_MASK_LO(u)  (0x3ff20c58 + 8 * (u))
+#define MAC_ADDR_MASK_HI(u)  (0x3ff20c5c + 8 * (u))
+#define MAC_ADDR_MATCH_ENABLE 0x00010000
+
 #define MAC_PHY_CTRL         0x3ff20c70
 #define MAC_PHY_RF_UP        0x00000002
+#define MAC_TX_STATUS        0x3ff20c84
+#define MAC_RX_OPTION        0x3ff20c88
+#define MAC_RXTX_OPTION      0x3ff20c90
+#define MAC_TX_OPTION        0x3ff20c94
+#define MAC_PHY_CONF         0x3ff20e08
+
+#define MAC_TXQ(q)           (0x3ff20dc0 - 0x18 * (q))
+#define TXQ_LEN              0x00
+#define TXQ_DESC             0x04
+#define TXQ_RATE             0x08
+#define TXQ_DURATION         0x10
+#define TXQ_LIFETIME         0x14
 
 #define RF_TX_DC_REG(i)      (0x60000404u + 4u * ((i) >> 1))
 #define RF_TXPWR_REGS        24

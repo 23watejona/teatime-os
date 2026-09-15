@@ -1,11 +1,6 @@
 #include "def.h"
 #include "reg_util.h"
-
-#define MAC_INT_EVENT  0x3ff20c20
-#define MAC_INT_CLEAR  0x3ff20c24
-
-#define FIQ_TX_DONE   (1u << 19)
-#define FIQ_MAC_TIMER (1u << 27)
+#include "wifi_regs.h"
 
 extern unsigned int wifi_rx_nmi_drain(void);
 extern int wifi_rx_cond;
@@ -17,9 +12,9 @@ volatile unsigned int wifi_fiq_tx_count;
 // unconsumed rx descriptors hold the event line, so the drain has to run before the status clear
 IRAM_ATTR void wifi_fiq_dispatch(void) {
     unsigned int status = READ_REG(MAC_INT_EVENT);
-    (void)READ_REG(0x3ff20c84);
+    (void)READ_REG(MAC_TX_STATUS);
 
-    if (status & FIQ_TX_DONE) {
+    if (status & MAC_INT_TX_DONE) {
         wifi_fiq_tx_count++;
         wifi_tx_dma_done();
     }

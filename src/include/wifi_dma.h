@@ -22,6 +22,5 @@ extern unsigned char *rx_data_base;
 extern unsigned char *rx_data_end;
 
 void init_wifi_dma(void);
-void lldesc_init_tx(struct lldesc *d, void *buf, unsigned int len);
 
 #endif

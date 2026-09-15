@@ -1,7 +1,7 @@
 #include "reg_util.h"
+#include "wifi_regs.h"
 #include "wifi_dma.h"
 #include "uart.h"
-
 #include "mem.h"
 
 // the rx mac bounds-checks every dma address against two windows and walks the descriptor chain from the base of the first, so descriptors and packet data must come from one contiguous allocation:
@@ -60,24 +60,13 @@ void init_wifi_dma(void) {
     kprintf_uart("init_wifi_dma: desc=%x data=%x..%x ctrl=%x\n",
                  rx_ring, rx_data_base, rx_data_end, rx_ctrl_desc);
 
-    WRITE_REG(0x3ff20080, (unsigned int) rx_ring);
-    WRITE_REG(0x3ff2007c, (unsigned int) rx_data_end);
-    WRITE_REG(0x3ff20088, (unsigned int) rx_ctrl_desc);
-    WRITE_REG(0x3ff20084, (unsigned int) (ctrl_word + 1));
-    WRITE_REG(0x3ff20000, READ_REG(0x3ff20000) & 0xffffff00);
-    WRITE_REG(0x3ff20008, (unsigned int) &rx_ring[0]);
-    WRITE_REG(0x3ff2000c, (unsigned int) rx_ctrl_desc);
+    WRITE_REG(MAC_DMA_RX_WINDOW_BASE, (unsigned int) rx_ring);
+    WRITE_REG(MAC_DMA_RX_WINDOW_END, (unsigned int) rx_data_end);
+    WRITE_REG(MAC_DMA_RX_CTRL_WINDOW_BASE, (unsigned int) rx_ctrl_desc);
+    WRITE_REG(MAC_DMA_RX_CTRL_WINDOW_END, (unsigned int) (ctrl_word + 1));
+    WRITE_REG_UNMASK(MAC_DMA_RX_CTRL, 0x000000ff);
+    WRITE_REG(MAC_DMA_RX_HEAD, (unsigned int) &rx_ring[0]);
+    WRITE_REG(MAC_DMA_RX_CTRL_HEAD, (unsigned int) rx_ctrl_desc);
     WRITE_REG(0x3ff20010, 0);
-    WRITE_REG(0x3ff20000, READ_REG(0x3ff20000) & 0xdfffffff);
-}
-
-void lldesc_init_tx(struct lldesc *d, void *buf, unsigned int len) {
-    d->size = len;
-    d->length = len;
-    d->offset = 0;
-    d->sosf = 0;
-    d->eof = 1;
-    d->owner = 1;
-    d->buf_ptr = buf;
-    d->next = 0;
+    WRITE_REG_UNMASK(MAC_DMA_RX_CTRL, 0x20000000);
 }

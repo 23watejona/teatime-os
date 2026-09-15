@@ -1,4 +1,5 @@
 #include "reg_util.h"
+#include "wifi_regs.h"
 #include "uart.h"
 #include "string.h"
 #include "wifi_tx.h"
@@ -7,43 +8,46 @@
 #include "wifi_ccmp.h"
 
 // tx hands the mac plaintext behind a ccmp header and the mac fills the mic; rx comes back decrypted in place but still carrying the ccmp header and mic, so wifi_ccmp_rx strips them
-#define CCMP_ENGINE  0x00030103u
 
 extern unsigned char ap_bssid[6];
 extern unsigned char wifi_mac_addr[6];
 
-#define KEY_SLOT(s)  (0x3ff21400u + (s) * 0x28u)
-#define KEY_ENABLE   0x3ff2080cu
+// the slot number, not the flag word, picks the key class: group frames draw from slots 2-5 matched on a2=bssid and unicast from 6-7, so swapping them makes the hw decrypt group frames with the pairwise key
+#define GROUP_KEY_SLOT    2
+#define PAIRWISE_KEY_SLOT 6
 
-static void write_key(unsigned int slot, unsigned int flagword, const u8 *key) {
+static void write_key(unsigned int slot, unsigned int flags, const u8 *key) {
     unsigned int lo = ap_bssid[0] | (ap_bssid[1] << 8) |
                       (ap_bssid[2] << 16) | (ap_bssid[3] << 24);
     unsigned int hi = ap_bssid[4] | (ap_bssid[5] << 8);
-    WRITE_REG(KEY_SLOT(slot) + 0, lo);
-    WRITE_REG(KEY_SLOT(slot) + 4, flagword | hi);
-    for (int i = 0; i < 4; i++)
-        WRITE_REG(KEY_SLOT(slot) + 8 + i * 4,
-                  key[i*4] | (key[i*4+1] << 8) | (key[i*4+2] << 16) | (key[i*4+3] << 24));
-    WRITE_REG(KEY_ENABLE, READ_REG(KEY_ENABLE) | (1u << slot));
+    WRITE_REG(MAC_KEY_ADDR(slot), lo);
+    WRITE_REG(MAC_KEY_FLAGS(slot), flags | hi);
+    for (int w = 0; w < 4; w++)
+        WRITE_REG(MAC_KEY_MATERIAL(slot, w),
+                  key[w*4] | (key[w*4+1] << 8) | (key[w*4+2] << 16) | (key[w*4+3] << 24));
+    WRITE_REG_MASK(MAC_KEY_ENABLE, 1u << slot);
+}
+
+static void write_gtk(void) {
+    write_key(GROUP_KEY_SLOT, MAC_KEY_CCMP | ((wpa_gtk_id & 1) << MAC_KEY_ID_SHIFT), wpa_gtk);
 }
 
 void wifi_ccmp_install_keys(void) {
-    // the slot number, not the flag word, picks the key class: group frames draw from slots 2-5 matched on a2=bssid and unicast from 6-7, so swapping them makes the hw decrypt group frames with the pairwise key
-    write_key(2, 0x004c0000u | ((wpa_gtk_id & 1) << 24), wpa_gtk);
-    write_key(6, 0x004c0000u, wpa_tk);
+    write_gtk();
+    write_key(PAIRWISE_KEY_SLOT, MAC_KEY_CCMP, wpa_tk);
 
-    WRITE_REG(0x3ff20800, CCMP_ENGINE);
+    WRITE_REG(MAC_CRYPTO_CIPHER, MAC_CIPHER_CCMP);
 
     kprintf_uart("ccmp: keys installed (enable=%x eng=%x)\n",
-                 READ_REG(KEY_ENABLE), READ_REG(0x3ff20800));
+                 READ_REG(MAC_KEY_ENABLE), READ_REG(MAC_CRYPTO_CIPHER));
 }
 
 void wifi_ccmp_install_gtk(void) {
-    write_key(2, 0x004c0000u | ((wpa_gtk_id & 1) << 24), wpa_gtk);
+    write_gtk();
 }
 
 void wifi_ccmp_clear_keys(void) {
-    WRITE_REG(KEY_ENABLE, READ_REG(KEY_ENABLE) & ~((1u << 2) | (1u << 6)));
+    WRITE_REG_UNMASK(MAC_KEY_ENABLE, (1u << GROUP_KEY_SLOT) | (1u << PAIRWISE_KEY_SLOT));
 }
 
 struct ccmp_frame {

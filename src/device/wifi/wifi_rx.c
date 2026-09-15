@@ -1,13 +1,10 @@
 #include "def.h"
 #include "reg_util.h"
+#include "wifi_regs.h"
 #include "wifi_dma.h"
 #include "wifi_sta.h"
 #include "proc.h"
 #include "timer.h"
-
-// RX_CURRENT is read-only and shows where the dma is, so the software head goes into RX_HEAD only when the dma isn't on it
-#define MAC_DMA_RX_HEAD     0x3ff20008
-#define MAC_DMA_RX_CURRENT  0x3ff2001c
 
 #define CHAN_DWELL (4 * TICKS_PER_SEC / 10) // a few 100 ms beacon intervals, so a dwell hears every ap on the channel
 #define SERVICER_TICK (TICKS_PER_SEC / 10)
@@ -82,6 +79,7 @@ IRAM_ATTR unsigned int wifi_rx_nmi_drain(void) {
         rx_cursor = rx_cursor->next;
         consumed++;
     }
+    // the current register is read-only and shows where the dma is, so the software head is only written when the dma isn't on it
     if (consumed && READ_REG(MAC_DMA_RX_CURRENT) != (unsigned int) rx_cursor)
         WRITE_REG(MAC_DMA_RX_HEAD, (unsigned int) rx_cursor);
     return consumed;

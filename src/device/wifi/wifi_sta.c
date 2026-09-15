@@ -1,6 +1,7 @@
 #include "timer.h"
 #include "proc.h"
 #include "reg_util.h"
+#include "wifi_regs.h"
 #include "uart.h"
 #include "string.h"
 #include "wifi_tx.h"
@@ -45,28 +46,28 @@ static void link_down(int rescan) {
 // with both address-match units masking every byte the mac acks nothing and the ap abandons the join, so one unit is pointed at our mac and one at the bssid with a full mask
 static void program_rx_filter(void) {
     const unsigned char *m = wifi_mac_addr;
-    WRITE_REG(0x3ff20c48, m[0] | (m[1] << 8) | (m[2] << 16) | (m[3] << 24));
-    WRITE_REG(0x3ff20c4c, m[4] | (m[5] << 8));
-    WRITE_REG(0x3ff20c58, 0xffffffff);
-    WRITE_REG(0x3ff20c5c, 0x0000ffff);
-    WRITE_REG(0x3ff20c28, ap_bssid[0] | (ap_bssid[1] << 8) | (ap_bssid[2] << 16) | (ap_bssid[3] << 24));
-    WRITE_REG(0x3ff20c2c, ap_bssid[4] | (ap_bssid[5] << 8));
-    WRITE_REG(0x3ff20c38, 0xffffffff);
-    WRITE_REG(0x3ff20c3c, 0x0000ffff);
-    WRITE_REG(0x3ff20c5c, READ_REG(0x3ff20c5c) | 0x00010000);
-    WRITE_REG(0x3ff20c3c, READ_REG(0x3ff20c3c) | 0x00010000);
+    WRITE_REG(MAC_ADDR_LO(0), m[0] | (m[1] << 8) | (m[2] << 16) | (m[3] << 24));
+    WRITE_REG(MAC_ADDR_HI(0), m[4] | (m[5] << 8));
+    WRITE_REG(MAC_ADDR_MASK_LO(0), 0xffffffff);
+    WRITE_REG(MAC_ADDR_MASK_HI(0), 0x0000ffff);
+    WRITE_REG(MAC_BSSID_LO(0), ap_bssid[0] | (ap_bssid[1] << 8) | (ap_bssid[2] << 16) | (ap_bssid[3] << 24));
+    WRITE_REG(MAC_BSSID_HI(0), ap_bssid[4] | (ap_bssid[5] << 8));
+    WRITE_REG(MAC_BSSID_MASK_LO(0), 0xffffffff);
+    WRITE_REG(MAC_BSSID_MASK_HI(0), 0x0000ffff);
+    WRITE_REG_MASK(MAC_ADDR_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
+    WRITE_REG_MASK(MAC_BSSID_MASK_HI(0), MAC_ADDR_MATCH_ENABLE);
 
     // in sniffer mode the mac acks nothing and truncates data frames to the header, so the sniffer bits from bring-up are undone here
-    WRITE_REG_UNMASK(0x3ff20c18, 0x0000000c);
-    WRITE_REG_UNMASK(0x3ff20800, 0x03000000);
-    WRITE_REG_MASK(0x3ff20800, 0x00010000);
-    WRITE_REG_UNMASK(0x3ff20804, 0x03000000);
-    WRITE_REG_MASK(0x3ff20804, 0x00010000);
+    WRITE_REG_UNMASK(MAC_INT_ENABLE, WDEV_SNIFFER_EVENT);
+    WRITE_REG_UNMASK(MAC_CRYPTO_CIPHER, 0x03000000);
+    WRITE_REG_MASK(MAC_CRYPTO_CIPHER, 0x00010000);
+    WRITE_REG_UNMASK(MAC_CRYPTO_CONF, 0x03000000);
+    WRITE_REG_MASK(MAC_CRYPTO_CONF, 0x00010000);
     // clearing this stops the mac delivering protected frames at all, so it stays set for the life of the association
-    WRITE_REG_MASK(0x3ff20c88, 0x00040000);
-    WRITE_REG_MASK(0x3ff20c94, 0x00000001);
+    WRITE_REG_MASK(MAC_RX_OPTION, 0x00040000);
+    WRITE_REG_MASK(MAC_TX_OPTION, 0x00000001);
     WRITE_REG_MASK(0x60009d44, 0x24000000);
-    WRITE_REG_MASK(0x3ff2006c, 0x00000007);
+    WRITE_REG_MASK(MAC_RX_FILTER, 0x00000007);
 }
 
 static unsigned int put_mgmt_hdr(unsigned char *b, unsigned int subtype) {

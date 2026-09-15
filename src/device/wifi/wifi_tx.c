@@ -1,27 +1,23 @@
 #include "def.h"
 #include "reg_util.h"
-#include "wait.h"
-#include "uart.h"
+#include "wifi_regs.h"
 #include "proc.h"
 #include "timer.h"
 #include "wifi_dma.h"
 #include "wifi_tx.h"
 
-// tx is a per-queue mmio block rather than a descriptor ring: the length, plcp and descriptor words are armed first and the go bits set last, so the queue never launches a half-written frame; completion is TX_DONE_BIT in MAC_INT_EVENT
+// tx is a per-queue mmio block rather than a descriptor ring: the rate, duration, lifetime, length and descriptor words are armed first and the go bits set last, so the queue never launches a half-written frame; completion is MAC_INT_TX_DONE in MAC_INT_EVENT
 
-#define TXQ(q)         (0x3ff20dc0u - 0x18u * (q))
-#define MAC_INT_EVENT  0x3ff20c20u
-#define MAC_INT_CLEAR  0x3ff20c24u
-#define TX_DONE_BIT    0x00080000u
-#define TX_GO_BITS     0xc0000000u
+#define TX_GO_BITS     0xc0000000
 
-#define TX_QUEUE       0u
-#define TX_RATE        3u // 11 mbps cck, so no ofdm plcp word is needed
-// the tx engine picks its key by the slot index in dc8 bits 16-23, not by address like rx, so the pairwise slot must be named or the frame encrypts against an empty slot and tx stalls with no completion
-#define TX_FMT_BITS    0x01600000u // crypto-routed, non-aggregated data
-#define TX_KEYSLOT     6u // must match the pairwise slot wifi_ccmp_install_keys writes
-#define TX_DD0         0x002c0000u // duration
-#define TX_DD4         0x003ff000u // frame lifetime; zero can age the frame out before it ever transmits
+#define TX_QUEUE       0
+#define TX_RATE        3 // 11 mbps cck, so no ofdm plcp word is needed
+// the tx engine picks its key by the slot index in the rate word, not by address like rx, so the pairwise slot must be named or the frame encrypts against an empty slot and tx stalls with no completion
+#define TX_FMT_CRYPTO  0x01600000 // crypto-routed, non-aggregated data
+#define TX_FMT_PLAIN   0x00400000
+#define TX_KEYSLOT     6 // must match the pairwise slot wifi_ccmp_install_keys writes
+#define TX_DURATION    0x002c0000
+#define TX_LIFETIME    0x003ff000 // zero can age the frame out before it ever transmits
 #define TX_DONE_TICKS  (TICKS_PER_SEC / 50)
 #define DESCRIPTOR_TICKS (TICKS_PER_SEC / 10)
 
@@ -59,20 +55,20 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
         return -1;
 
     unsigned int air = len + 4;
-    unsigned int B = TXQ(TX_QUEUE);
+    unsigned int q = MAC_TXQ(TX_QUEUE);
 
-    unsigned int protectd = frame[1] & FC_PROTECTED;
-    unsigned int dc4, dc8, dd0, dd4;
-    if (protectd) {
-        dc4 = TX_FMT_BITS;
-        dc8 = (air & 0xfffu) | (TX_RATE << 12) | (TX_KEYSLOT << 16);
-        dd0 = TX_DD0;
-        dd4 = TX_DD4;
+    unsigned int protected = frame[1] & FC_PROTECTED;
+    unsigned int fmt, rate, duration, lifetime;
+    if (protected) {
+        fmt = TX_FMT_CRYPTO;
+        rate = air | (TX_RATE << 12) | (TX_KEYSLOT << 16);
+        duration = TX_DURATION;
+        lifetime = TX_LIFETIME;
     } else {
-        dc4 = 0x00400000u;
-        dc8 = air | (TX_RATE << 12);
-        dd0 = 0;
-        dd4 = 0;
+        fmt = TX_FMT_PLAIN;
+        rate = air | (TX_RATE << 12);
+        duration = 0;
+        lifetime = 0;
     }
 
     mutex_lock(descriptor_mutex);
@@ -90,7 +86,7 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
     struct mac_header *mac = (struct mac_header *)tx_buf;
     mac->sequence_control = tx_seq << 4;
     tx_seq = (tx_seq + 1) & 0xfff;
-    if (protectd) {
+    if (protected) {
         struct ccmp_header *ccmp = (struct ccmp_header *)(tx_buf + sizeof(struct mac_header));
         ccmp->pn0 = pn_lo;
         ccmp->pn1 = pn_lo >> 8;
@@ -113,20 +109,20 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
     tx_desc.buf_ptr = tx_buf;
     tx_desc.next = 0;
 
-    unsigned int daddr = (unsigned int) &tx_desc & 0x3ffffu;
+    unsigned int desc_addr = (unsigned int) &tx_desc & 0x3ffff;
     mutex_unlock(descriptor_mutex);
 
     mutex_lock(dma_mutex);
     unsigned int prev_tx_count = wifi_fiq_tx_count;
 
     __asm__ volatile("memw");
-    WRITE_REG(B + 0x08, dc8);
-    WRITE_REG(B + 0x10, dd0);
-    WRITE_REG(B + 0x14, dd4);
-    WRITE_REG(B + 0x00, (air << 12) & 0x3ff000u);
-    WRITE_REG(B + 0x04, daddr | dc4);
+    WRITE_REG(q + TXQ_RATE, rate);
+    WRITE_REG(q + TXQ_DURATION, duration);
+    WRITE_REG(q + TXQ_LIFETIME, lifetime);
+    WRITE_REG(q + TXQ_LEN, (air << 12) & 0x3ff000);
+    WRITE_REG(q + TXQ_DESC, desc_addr | fmt);
     __asm__ volatile("memw");
-    WRITE_REG(B + 0x04, READ_REG(B + 0x04) | TX_GO_BITS);
+    WRITE_REG_MASK(q + TXQ_DESC, TX_GO_BITS);
 
     int rc = -1;
     while (wifi_fiq_tx_count == prev_tx_count)
