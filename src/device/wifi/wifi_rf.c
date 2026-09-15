@@ -7,13 +7,32 @@
 
 void wifi_set_channel(unsigned int ch);
 void rf_regs_init(void);
-static void rx_analog_init(void);
 void rx_gain_init(unsigned int rxmax);
 void init_wifi_pbus(void);
 void init_wifi_bb(void);
 void tx_rf_enable(void);
 unsigned int rx_digital_stop(void);
-void rx_digital_start(unsigned int a2c_saved);
+void rx_digital_start(unsigned int dig_rx_saved);
+
+static void rx_max_gain_analog(void) {
+    int d = rf_i2c_read(I2C_RFPLL, 1, 5);
+
+    int g0 = (24 * d - 340) / 227;
+    if (g0 > 15) g0 = 15;
+    if (g0 < 0) g0 = 0;
+
+    int g1 = (23 * d + 29) / 207;
+    if (g1 > 15) g1 = 15;
+
+    rf_i2c_write(I2C_RX_GAIN, 0, 4, g0 | 0x40);
+    rf_i2c_write(I2C_RX_GAIN, 0, 7, g1 | 0x40);
+    rf_i2c_write(97, 1, 5, 0xe0);
+}
+
+static void rx_analog_init(void) {
+    rf_i2c_write(97, 1, 8, 17);
+    rx_max_gain_analog();
+}
 
 void rx_path_enable(void) {
     WRITE_REG_RMW(RF_CAL_MODE, 0xfe7fffff, 0);
@@ -112,8 +131,8 @@ void rc_calibrate(void) {
     rf_i2c_write_mask(104, 3, 1, 0, 0, 0);
     kprintf_uart("      rc:done\n");
 
-    int rc_a = (signed char)((16 * (int)v - 39) / 30);
-    int rc_b = (signed char)((((unsigned char)((unsigned short)(28 * v) / 9)) + 2) >> 2);
+    int rc_a = (16 * (int)v - 39) / 30;
+    int rc_b = (28 * v / 9 + 2) >> 2;
 
     rf_i2c_write(97,  1, 2, (rc_a | 0xa0) & 0xff);
     rf_i2c_write(102, 3, 1, (rc_b | 0x40) & 0xff);
@@ -160,7 +179,7 @@ void pbus_force(unsigned int reg, unsigned int width, unsigned int val) {
     v |= (val & 0xffff) << PBUS_FORCE_VAL_SHIFT;
     v |= (width & 0xff) << PBUS_FORCE_WIDTH_SHIFT;
     WRITE_REG(PBUS_CTRL, v);
-    for (unsigned int t = 0; (int)READ_REG(PBUS_STATUS) < 0 && t < 100000u; t++)
+    for (unsigned int t = 0; (READ_REG(PBUS_STATUS) & PBUS_BUSY) && t < 100000u; t++)
         ;
     // only the force-test strobe is cleared; debug mode stays on until pbus_work_mode
     WRITE_REG_UNMASK(PBUS_CTRL, PBUS_FORCE_STROBE);
@@ -172,7 +191,7 @@ void pbus_tx_power_off(void) {
     pbus_force(2, 1, 128);
 }
 
-#define TX_BB_ATTEN 0x00u
+#define TX_BB_ATTEN 0
 static void tx_bb_atten_max(void) {
     for (unsigned int i = 0; i < RF_TXPWR_REGS; i++) {
         unsigned int a = RF_TXPWR_REG(i);
@@ -213,36 +232,11 @@ void pbus_debug_mode(void) {
     }
 }
 
-static void rx_max_gain_analog(void) {
-    int d = rf_i2c_read(I2C_RFPLL, 1, 5);
-
-    int g0 = (24 * d - 340) / 227;
-    if (g0 > 15) g0 = 15;
-    if (g0 == -1) g0 = 0;
-
-    int g1 = (23 * d + 29) / 207;
-    if (g1 > 15) g1 = 15;
-
-    rf_i2c_write(I2C_RX_GAIN, 0, 4, (g0 & 0xf) | 64);
-    rf_i2c_write(I2C_RX_GAIN, 0, 7, (g1 & 0xf) | 64);
-    rf_i2c_write(97, 1, 5, 224);
-}
-
-static void rx_analog_init(void) {
-    rf_i2c_write(97, 1, 8, 17);
-    rx_max_gain_analog();
-}
-
 void rx_chan_compensate(unsigned int ch, int level) {
-    int base = (ch >= 7 && ch <= 13) ? ((int)(ch - 6) / 5 - 7) : -7;
-    int a = 0, b = 0, c = 0;
-    if (level == 1) { a = -6; b = -6; c = -6; }
-    int v;
-    if (ch < 7)        v = (b - a) * ((int)ch - 1) / 5 + a;
-    else if (ch <= 13) v = (c - b) * ((int)ch - 6) / 5 + b;
-    else               v = (c - b) * ((int)ch - 2) / 5 + b;
-    unsigned char cmp = (unsigned char)(base + (unsigned char)v);
-    WRITE_REG_RMW(BB_RX_CHAN_COMP, 0xfffc03ff, (unsigned int)cmp << 10);
+    int base = (ch >= 11 && ch <= 13) ? -6 : -7;
+    int ext = (level == 1) ? -6 : 0;
+    unsigned int cmp = (base + ext) & 0xff;
+    WRITE_REG_RMW(BB_RX_CHAN_COMP, 0xfffc03ff, cmp << 10);
     WRITE_REG_MASK(BB_RX_GAIN_FORCE, BB_RX_GAIN_LATCH);
     WRITE_REG_UNMASK(BB_RX_GAIN_FORCE, BB_RX_GAIN_LATCH);
 }
@@ -251,7 +245,7 @@ void rx_max_gain_digital(unsigned int ch, int level) {
     if (level)
         WRITE_REG_UNMASK(RF_RX_GAIN_EXT, RF_RX_GAIN_EXT_DIG);
     else
-        WRITE_REG_RMW(RF_RX_GAIN_EXT, 0xffffffef, RF_RX_GAIN_EXT_DIG);
+        WRITE_REG_MASK(RF_RX_GAIN_EXT, RF_RX_GAIN_EXT_DIG);
     rx_chan_compensate(ch, level);
 }
 
@@ -284,24 +278,18 @@ void rf_init(void) {
     rf_i2c_write(I2C_BB, 0, 26, 56);
 }
 
-static void tx_dc_offset_apply(unsigned int val16, const signed char *tbl) {
-    unsigned int fld = (val16 & 0xffff) << 8;
-    int c = tbl[1];
-    int d = tbl[0];
+// the offsets are shifted as signed values, so a negative one also sets every bit above its field
+static void tx_dc_offset_apply(unsigned int gain, const signed char *offset) {
+    int i_off = offset[0];
+    int q_off = offset[1];
     for (unsigned int i = 0; i < RF_TXPWR_REGS; i++) {
-        volatile unsigned int *r1 = (volatile unsigned int *) RF_TXPWR_REG(i);
-        *r1 = (*r1 & 0xfff000ff) | fld;
-        volatile unsigned int *r2 = (volatile unsigned int *) RF_TX_DC_REG(i);
-        unsigned int a4;
-        if (i & 1) {
-            a4 = (unsigned int)(((int)(c << 24)) >> 3)  |
-                 (unsigned int)(((int)(d << 24)) >> 10);
-            *r2 = a4 | (*r2 & 0xf0003fff);
-        } else {
-            a4 = (unsigned int)(((int)(c << 24)) >> 17) |
-                 (unsigned int)(((int)(d << 24)) >> 24);
-            *r2 = a4 | (*r2 & 0xffffc000);
-        }
+        volatile unsigned int *pwr = (volatile unsigned int *) RF_TXPWR_REG(i);
+        *pwr = (*pwr & 0xfff000ff) | (gain << 8);
+        volatile unsigned int *dc = (volatile unsigned int *) RF_TX_DC_REG(i);
+        if (i & 1)
+            *dc = (*dc & 0xf0003fff) | (q_off << 21) | (i_off << 14);
+        else
+            *dc = (*dc & 0xffffc000) | (q_off << 7) | i_off;
     }
 }
 
@@ -323,14 +311,14 @@ static int dc_clamp_s8(int v) {
 
 static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
     int acc_i = 0, acc_q = 0;
-    int prev_i = 0x40, prev_q = 0x40;
-    int step = 0x1c;
+    int code_i = 64, code_q = 64;
+    int step = 28;
 
     pbus_force(0, 1, gain);
 
     for (unsigned int n = 0; n < DC_CAL_SAMPLES; n++) {
-        pbus_force(1, 2, (unsigned int)prev_q & 0xffff);
-        pbus_force(0, 2, (unsigned int)prev_i & 0xffff);
+        pbus_force(1, 2, code_q);
+        pbus_force(0, 2, code_i);
 
         WRITE_REG(MCAL_REG, MCAL_ARM);
         WRITE_REG(MCAL_REG, MCAL_TRIGGER);
@@ -340,44 +328,43 @@ static void tx_dc_offset_measure(unsigned int gain, signed char out[2]) {
             if (READ_REG(MCAL_REG) & MCAL_DONE)
                 break;
 
-        unsigned int s = READ_REG(MCAL_REG);
-        unsigned int s2 = READ_REG(MCAL_REG); // read twice on purpose: the first read's sign steers i, the second read's q flag steers q
-        int st = (signed char)step;
+        unsigned int sign_i = READ_REG(MCAL_REG);
+        unsigned int sign_q = READ_REG(MCAL_REG); // read twice on purpose: the first read's sign steers i, the second read's q flag steers q
 
-        if ((int)s < 0) prev_i -= st;
-        else            prev_i += st;
-        prev_i = dc_clamp_s8(prev_i);
+        if ((int)sign_i < 0) code_i -= step;
+        else                 code_i += step;
+        code_i = dc_clamp_s8(code_i);
 
-        if (s2 & MCAL_QFLAG) prev_q -= st;
-        else                 prev_q += st;
-        prev_q = dc_clamp_s8(prev_q);
+        if (sign_q & MCAL_QFLAG) code_q -= step;
+        else                     code_q += step;
+        code_q = dc_clamp_s8(code_q);
 
-        step = (st == 2) ? 1 : (st >> 1) + 1;
+        step = (step == 2) ? 1 : (step >> 1) + 1;
 
         if (n >= DC_CAL_SAMPLES - DC_CAL_AVG) {
-            acc_i = (short)(acc_i + prev_i);
-            acc_q = (short)(acc_q + prev_q);
+            acc_i += code_i;
+            acc_q += code_q;
         }
     }
 
     acc_q = (acc_q + 2) >> 2;
     acc_i = (acc_i + 2) >> 2;
 
-    pbus_force(1, 2, (unsigned int)acc_q & 0xffff);
-    pbus_force(0, 2, (unsigned int)acc_i & 0xffff);
+    pbus_force(1, 2, acc_q);
+    pbus_force(0, 2, acc_i);
     pbus_force(1, 1, 127);
     WRITE_REG(MCAL_REG, MCAL_STOP);
 
-    out[0] = (signed char)acc_i;
-    out[1] = (signed char)acc_q;
+    out[0] = acc_i;
+    out[1] = acc_q;
 }
 
-static unsigned int tx_gain_to_dc_index(unsigned int g) {
-    static const unsigned char csw154[21] = {
-        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 3
+static unsigned int tx_gain_to_dc_index(unsigned int gain) {
+    static const unsigned char dc_index_tab[17] = {
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
     };
-    unsigned int i = (g - 4) & 0xff;
-    return (i > 16) ? 1u : csw154[i];
+    unsigned int i = gain - 4;
+    return (i > 16) ? 1 : dc_index_tab[i];
 }
 
 // the tx gain hasn't been written yet at this point, so the dc offset is calibrated against its power-on default
@@ -398,8 +385,8 @@ static void tx_dc_offset_calibrate(void) {
     signed char sel[2];
     sel[0] = pairs[idx][0];
     sel[1] = pairs[idx][1];
-    pbus_force(0, 2, (unsigned int)(unsigned char)sel[0]);
-    pbus_force(1, 2, (unsigned int)(unsigned char)sel[1]);
+    pbus_force(0, 2, sel[0]);
+    pbus_force(1, 2, sel[1]);
 
     tx_dc_offset_apply(TX_RF_ANA_GAIN, sel);
     kprintf_uart("dcoff: p0=%d,%d p1=%d,%d p2=%d,%d p3=%d,%d sel[%d]=%d,%d\n",
@@ -412,17 +399,14 @@ static void tx_dc_offset_calibrate(void) {
 
 static void noise_floor_set(int nf) {
     WRITE_REG_UNMASK(BB_RX_CTRL, BB_NOISE_MEAS);
-    int v = nf + 1;
-    v = (v + (int)((unsigned int)v >> 31)) >> 1;
-    WRITE_REG_RMW(BB_NOISE_FLOOR, 0xfffffe00, (unsigned int)v & 0x1ff);
+    int v = (nf + 1) / 2;
+    WRITE_REG_RMW(BB_NOISE_FLOOR, 0xfffffe00, v & 0x1ff);
     WRITE_REG_RMW(BB_RX_CTRL, 0xfffd7ffd, BB_NOISE_MEAS);
 }
 
 static int noise_floor_get(void) {
-    unsigned int r = READ_REG(BB_NOISE_FLOOR);
-    int v = (int)((r >> 20) & 0xfff);
-    v = (v + 1) >> 1;
-    return (short)(v - 0x800);
+    int v = (READ_REG(BB_NOISE_FLOOR) >> 20) & 0xfff;
+    return ((v + 1) >> 1) - 0x800;
 }
 
 static int noise_floor_clamped(void) {
@@ -467,9 +451,9 @@ static void noise_init(void) {
 
     int nf[4];
     nf[0] = nf[1] = nf[2] = nf[3] = -340;
-    unsigned int s2c = READ_REG(BB_DIG_RX);
-    unsigned int s20 = READ_REG(0x60009d20);
-    unsigned int s40 = READ_REG(0x60009d40);
+    unsigned int saved_dig_rx = READ_REG(BB_DIG_RX);
+    unsigned int saved_d20 = READ_REG(0x60009d20);
+    unsigned int saved_d40 = READ_REG(0x60009d40);
 
     WRITE_REG_UNMASK(BB_DIG_RX, 1);
     WRITE_REG_UNMASK(0x60009d20, 0x40000000);
@@ -486,9 +470,9 @@ static void noise_init(void) {
         WRITE_REG_UNMASK(BB_RX_CTRL, BB_NOISE_MEAS);
     }
 
-    WRITE_REG(BB_DIG_RX, s2c);
-    WRITE_REG(0x60009d20, s20);
-    WRITE_REG(0x60009d40, s40);
+    WRITE_REG(BB_DIG_RX, saved_dig_rx);
+    WRITE_REG(0x60009d20, saved_d20);
+    WRITE_REG(0x60009d40, saved_d40);
 
     if (ok) {
         int mn = nf[0];
@@ -503,7 +487,7 @@ int live_rssi(void) {
     WRITE_REG_UNMASK(BB_RX_CTRL, BB_NOISE_MEAS);
     noise_floor_measure(1);
     int v = (int)(READ_REG(BB_RX_RSSI) & 0xfff) - 0xfff;
-    return (v << 15) >> 16;
+    return v >> 1;
 }
 
 void bb_bringup(void) {
@@ -550,11 +534,11 @@ unsigned int rx_digital_stop(void) {
     return saved;
 }
 
-void rx_digital_start(unsigned int a2c_saved) {
+void rx_digital_start(unsigned int dig_rx_saved) {
     WRITE_REG_UNMASK(BB_SLEEP, BB_SLEEP_RX);
     WRITE_REG_MASK(BB_RX_CTRL, BB_RX_RESET);
     WRITE_REG_UNMASK(BB_RX_CTRL, BB_RX_RESET);
-    WRITE_REG(BB_DIG_RX, a2c_saved);
+    WRITE_REG(BB_DIG_RX, dig_rx_saved);
 }
 
 void agc_enable(void) {
