@@ -29,6 +29,7 @@ static void write_key(unsigned int slot, unsigned int flags, const u8 *key) {
     WRITE_REG_MASK(MAC_KEY_ENABLE, 1u << slot);
 }
 
+// the group key carries its key id in the flag word, so a rekey to the other id lands in the same slot with the id the ap will use
 static void write_gtk(void) {
     write_key(GROUP_KEY_SLOT, MAC_KEY_CCMP | ((wpa_gtk_id & 1) << MAC_KEY_ID_SHIFT), wpa_gtk);
 }

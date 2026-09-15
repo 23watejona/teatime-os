@@ -1,12 +1,17 @@
 #include "reg_util.h"
 #include "wifi_regs.h"
 
+// the pbus is the baseband's serial link to the analog rf, so its timing and the adc clock divider in the low bits of PBUS_CFG have to be right before any force-write or calibration
 void init_wifi_pbus(void) {
+    // bus timing field, written to both the config register and its mirror for the second chain
     WRITE_REG_RMW(PBUS_CFG, 0xf01fffff, 0x01800000);
     WRITE_REG_RMW(PBUS_CFG_MIRROR, 0xf01fffff, 0x01800000);
+    // top two bits of the control register are part of the bus enable field
     WRITE_REG_RMW(PBUS_CTRL, 0x1fffffff, 0xc0000000);
+    // two more timing fields, one of them in the status register
     WRITE_REG_RMW(PBUS_CFG, 0xffe03fff, 0x001f4000);
     WRITE_REG_RMW(PBUS_STATUS, 0xff00ffff, 0x00ab0000);
     WRITE_REG_RMW(RFPLL_CTRL, 0xffff00ff, 0x00000100);
+    // adc clock divider in the low seven bits
     WRITE_REG_RMW(PBUS_CFG, 0xffffff80, 0x00000047);
 }

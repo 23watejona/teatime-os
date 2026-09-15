@@ -4,17 +4,20 @@
 
 extern int init_cpu_clk(unsigned int clk_rate_mhz);
 
+// this is the rtc analog reset sequence a wake from deep sleep runs, done at boot instead, so the rf comes up from the same rtc state either way
 void init_wifi_clk(void) {
     WRITE_REG_MASK(DPORT_CLK_EN, DPORT_WIFI_CLK_EN);
 
     rtc.sleep_mask = 0xffffffff;
 
+    // wake-up options: the state register's low six bits and the option bit, then the pll and crystal wait time, and a sleep target far enough out that no sleep fires during bring-up
     WRITE_REG(0x60000718, (READ_REG(0x60000718) & ~0x3Fu) | 8);
     WRITE_REG_UNMASK(0x600007a8, 0x1);
 
     rtc.pwr = 0x00046046;
     rtc.slp_val = rtc.slp_cnt_val + 1000;
 
+    // the wake status bits take time to appear after the wifi clock bit is set, so they are polled rather than assumed
     rtc.analog_0 |= DPORT_WIFI_CLK_EN;
     for (unsigned int t = 0; (rtc.status & 0x3) == 0 && t < 100000u; t++)
         ;

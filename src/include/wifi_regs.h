@@ -21,12 +21,14 @@
 #define MAC_DMA_RX_HEAD             0x3ff20008
 #define MAC_DMA_RX_CTRL_HEAD        0x3ff2000c
 #define MAC_DMA_RX_CURRENT          0x3ff2001c
+// rx filter: bits 0-2 enable the address-match filters (clear accepts every frame), bit 4 is held while scanning or associated
 #define MAC_RX_FILTER               0x3ff2006c
 #define MAC_DMA_RX_WINDOW_END       0x3ff2007c
 #define MAC_DMA_RX_WINDOW_BASE      0x3ff20080
 #define MAC_DMA_RX_CTRL_WINDOW_END  0x3ff20084
 #define MAC_DMA_RX_CTRL_WINDOW_BASE 0x3ff20088
 
+// crypto config, one register per direction: low byte cipher select, bit 16 engine enable, bits 24-25 pass frames through undecrypted
 #define MAC_CRYPTO_CIPHER    0x3ff20800
 #define MAC_CRYPTO_CONF      0x3ff20804
 #define MAC_CRYPTO_OFF       0x00030000
@@ -36,6 +38,7 @@
 #define MAC_KEY_ADDR(s)      MAC_KEY_SLOT(s)
 #define MAC_KEY_FLAGS(s)     (MAC_KEY_SLOT(s) + 4)
 #define MAC_KEY_MATERIAL(s, w) (MAC_KEY_SLOT(s) + 8 + 4 * (w))
+// key flag word: bits 18-20 key type (3 for a station key), bits 21-23 cipher code (2 = ccmp), bit 24 key id, bit 31 marks a unicast key
 #define MAC_KEY_CCMP         0x004c0000
 #define MAC_KEY_ID_SHIFT     24
 
@@ -47,7 +50,7 @@
 #define WDEV_INTEREST_EVENT  0x2c880300
 #define WDEV_SNIFFER_EVENT   0x0000000c
 
-// two address-match units, each with an address and a byte mask; bit 16 of the mask high word enables the unit
+// two address-match units, each with an address and a byte mask; bit 16 of the mask high word enables the unit and is held for as long as its interface is up (unit 0 station, unit 1 access point)
 #define MAC_BSSID_LO(u)      (0x3ff20c28 + 8 * (u))
 #define MAC_BSSID_HI(u)      (0x3ff20c2c + 8 * (u))
 #define MAC_BSSID_MASK_LO(u) (0x3ff20c38 + 8 * (u))
@@ -61,6 +64,7 @@
 #define MAC_PHY_CTRL         0x3ff20c70
 #define MAC_PHY_RF_UP        0x00000002
 #define MAC_TX_STATUS        0x3ff20c84
+// rx option bit 18 passes protected frames to the dma (sniffer raw delivery, but also needed for decrypted delivery); tx option bit 0 is the mac transmit enable, which the sniffer clears so nothing is acked
 #define MAC_RX_OPTION        0x3ff20c88
 #define MAC_RXTX_OPTION      0x3ff20c90
 #define MAC_TX_OPTION        0x3ff20c94
@@ -92,6 +96,7 @@
 #define PBUS_BUSY              0x80000000
 #define PBUS_READ_WINDOW       0x600005a4
 
+// rfpll control: bits 20-23 latch the pll while its divider is reprogrammed, bits 16-17 hold its output across sleep
 #define RFPLL_CTRL           0x600005c8
 #define RFPLL_LATCH          0x00f00000
 #define RF_CAL_MODE          0x600005e8
@@ -105,6 +110,7 @@
 #define BB_TX_CAL            0x60009a28
 #define BB_DIG_RX            0x60009a2c
 #define BB_DIG_RX_EN         0x00080000
+// rx gain force: lna code in the low byte, vga code from bit 2, latch in bit 0
 #define BB_RX_GAIN_FORCE     0x60009a34
 #define BB_RX_GAIN_LATCH     0x00000001
 #define BB_RX_GAIN_WINDOW    0x60009a68
@@ -117,6 +123,7 @@
 #define BB_RX_CTRL           0x60009b60
 #define BB_RX_RESET          0x00000001
 #define BB_NOISE_MEAS        0x00000002
+// noise floor: floor value in bits 0-8, channel index in bits 9-11, cca threshold in bits 12-19, measured floor read back from bits 20-31
 #define BB_NOISE_FLOOR       0x60009b64
 #define BB_RX_FILTER         0x60009c04
 #define BB_ANT_SWITCH_LO     0x60009d60
