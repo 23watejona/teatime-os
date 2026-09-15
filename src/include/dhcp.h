@@ -9,7 +9,7 @@
 #define DHCP_BOOTREQUEST 1
 #define DHCP_HTYPE_ETHERNET 1
 #define DHCP_COOKIE 0x63825363
-// some servers drop anything shorter and all pad replies to it, so both directions use this length
+// some servers drop a request shorter than this, so requests are padded to it and replies are not held to it
 #define DHCP_MSG_LEN 300
 
 #define DHCP_OPT_SUBNET_MASK 1

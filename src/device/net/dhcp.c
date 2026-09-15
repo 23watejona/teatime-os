@@ -11,6 +11,8 @@
 #define XID 0x7ea7ea00
 #define REPLY_TICKS (2 * TICKS_PER_SEC)
 #define RETRIES 8
+// the checks only read the message type option, so a reply need not be padded
+#define REPLY_MIN (sizeof(struct dhcp_msg) + 3)
 
 extern unsigned char wifi_mac_addr[6];
 extern struct ipv4_addr local_ip;
@@ -57,7 +59,7 @@ void dhcp_proc(void) {
         write(fd, txbuf, sizeof(txbuf));
         if (read(fd, rxbuf, sizeof(rxbuf)) < 0)
             continue;
-        if (rx->len >= DHCP_MSG_LEN && reply->xid == xid
+        if (rx->len >= REPLY_MIN && reply->xid == xid
             && reply->options[0] == DHCP_OPT_MSG_TYPE && reply->options[2] == DHCP_OFFER)
             break;
     }
@@ -79,7 +81,7 @@ void dhcp_proc(void) {
         write(fd, txbuf, sizeof(txbuf));
         if (read(fd, rxbuf, sizeof(rxbuf)) < 0)
             continue;
-        if (rx->len >= DHCP_MSG_LEN && reply->xid == xid
+        if (rx->len >= REPLY_MIN && reply->xid == xid
             && reply->options[0] == DHCP_OPT_MSG_TYPE && reply->options[2] == DHCP_ACK)
             break;
     }
