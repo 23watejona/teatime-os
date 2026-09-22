@@ -13,18 +13,26 @@ CFLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-missing-braces -O0 \
 LDFLAGS=-nostdlib -nostartfiles --gc-sections
 ASFLAGS=--warn --fatal-warnings -I $(INCLUDE_DIR)
 
-SRC_C=$(shell find $(SRC_DIR) -name '*.c')
-SRC_S=$(shell find $(SRC_DIR) -name '*.s')
-SRC_S_CAP=$(shell find $(SRC_DIR) -name '*.S')
+# find returns directory order, so sort to keep link order the same on every host
+SRC_C=$(sort $(shell find $(SRC_DIR) -name '*.c'))
+SRC_S=$(sort $(shell find $(SRC_DIR) -name '*.s'))
+SRC_S_CAP=$(sort $(shell find $(SRC_DIR) -name '*.S'))
 
 OBJ=$(SRC_C:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o) \
     $(SRC_S:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o) \
     $(SRC_S_CAP:$(SRC_DIR)/%.S=$(BUILD_DIR)/%.o)
 DEPENDS=$(OBJ:%.o=%.d)
 
-# Auto-discover the board's serial port (macOS CP210x / SiLabs, then Linux). Override with USB=...
-USB?=$(shell ls /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART* /dev/tty.usbserial-* /dev/ttyUSB* 2>/dev/null | head -n1)
-ESPTOOL=esptool
+USB?=$(firstword $(wildcard /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART* \
+                            /dev/tty.usbserial-* /dev/ttyUSB* /dev/ttyACM*))
+
+# esptool before v5 installs under its script name, so fall back to that
+ESPTOOL?=$(shell command -v esptool 2>/dev/null || echo esptool.py)
+HOSTCC?=cc
+PICOCOM?=picocom
+BAUD?=76800
+
+CHECK_USB=@test -n "$(USB)" || { echo "ERROR: no serial port found — plug the board in or set USB=/dev/..."; exit 1; }
 
 .PHONY: default all flash monitor clean test
 
@@ -52,18 +60,22 @@ $(AP_SECRETS):
 	fi
 
 # Host-compiled crypto self-test (RFC/FIPS vectors); needs no hardware.
+# -iquote keeps this dir off the <> search path, so the host libc headers do not
+# pick up our freestanding stdarg.h
 test:
-	cc -std=c99 -Wall -I $(INCLUDE_DIR) ../tests/crypto_test.c $(SRC_DIR)/device/wifi/wifi_crypto.c -o build/crypto_test
-	./build/crypto_test
+	@mkdir -p $(BUILD_DIR)
+	$(HOSTCC) -std=c99 -Wall -iquote $(INCLUDE_DIR) ../tests/crypto_test.c $(SRC_DIR)/device/wifi/wifi_crypto.c -o $(BUILD_DIR)/crypto_test
+	./$(BUILD_DIR)/crypto_test
 
 all: flash monitor
 
 flash: prog.bin
-	@test -n "$(USB)" || { echo "ERROR: no serial port found — plug the board in or set USB=/dev/..."; exit 1; }
-	$(ESPTOOL) --port $(USB) write_flash -fm qio 0x00000 prog.bin 0x10000 prog.irom.bin
+	$(CHECK_USB)
+	$(ESPTOOL) --chip esp8266 --port $(USB) write_flash -fm qio 0x00000 prog.bin 0x10000 prog.irom.bin
 
 monitor:
-	picocom $(USB) -b 76800
+	$(CHECK_USB)
+	$(PICOCOM) $(USB) -b $(BAUD)
 
 prog.bin: prog.elf
 	@echo "Generating $@ from $<"
@@ -94,6 +106,6 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.S
 	@$(CC) -I $(INCLUDE_DIR) -c $< -o $@
 
 clean:
-	@rm -rf $(BUILD_DIR) prog.bin prog.elf
+	@rm -rf $(BUILD_DIR) prog.bin prog.irom.bin prog.elf
 
 -include $(DEPENDS)
