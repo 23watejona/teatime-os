@@ -27,17 +27,26 @@ What it does:
 
 ## Build
 
-Requires the `xtensa-lx106-elf` GCC toolchain on `PATH`, `make`, `esptool` and
-`picocom`.
+Requires the `xtensa-lx106-elf` GCC toolchain on `PATH`, GNU make 4 or
+later, `esptool` and `picocom`. On macOS use Homebrew's `gmake`; the system
+`make` is too old.
 
 ```sh
 cp src/include/ap_secrets.h.example src/include/ap_secrets.h   # fill in your AP
 cd compile
 make            # prog.bin + prog.irom.bin
-make flash      # write both images over the auto-detected serial port
+make flash      # write both images over the serial port
 make monitor    # serial console at 76800 baud
 make test       # host-compiled crypto self-test against RFC/FIPS vectors
 ```
+
+The serial port is found automatically on macOS and Linux; override it with
+`USB=/dev/...`. `ESPTOOL`, `PICOCOM`, `HOSTCC` and `BAUD` can be set the same
+way. `make test` needs only a host C compiler.
+
+On Linux, add yourself to the `dialout` group to flash without `sudo`, and use
+a `picocom` with custom baud rate support (the Debian package has it), since
+76800 baud is not a standard rate.
 
 `ap_secrets.h` holds the SSID, passphrase and BSSID of the access point.
 The build refuses to run without it by default. The board takes a DHCP
