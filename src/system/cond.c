@@ -96,10 +96,11 @@ IRAM_ATTR void cond_broadcast(int c) {
 
 IRAM_ATTR void cond_signal_isr(int c) {
     int m = disable();
-    if (proc_queue_empty(condtab[c].queue))
-        condtab[c].pending = 1;
-    else
-        wake_all(c);
+    // we may be interrupting a caller who is expecting this signal. mark it
+    // pending so any caller who lost the race between checking the condition
+    // and the condition fulfilling still gets the appropriate wakeup
+    condtab[c].pending = 1;
+    wake_all(c);
     enable(m);
 }
 

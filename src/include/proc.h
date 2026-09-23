@@ -55,7 +55,7 @@ void cond_wait(int c, int mutex);
 int cond_timedwait(int c, int mutex, unsigned int delay);
 void cond_signal(int c);
 void cond_broadcast(int c);
-/* L1 handler side: wakes every waiter now, else remembered for the next wait */
+// for l1 handlers
 void cond_signal_isr(int c);
 /* NMI side: flag only; the clock delivers it on the next tick */
 void cond_signal_nmi(int c);
