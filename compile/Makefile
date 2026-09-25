@@ -34,9 +34,9 @@ BAUD?=76800
 
 CHECK_USB=@test -n "$(USB)" || { echo "ERROR: no serial port found — plug the board in or set USB=/dev/..."; exit 1; }
 
-.PHONY: default all flash monitor clean test
+.PHONY: default all flash monitor clean test compile_commands
 
-default: prog.bin
+default: prog.bin compile_commands
 
 AP_SECRETS=$(INCLUDE_DIR)/ap_secrets.h
 
@@ -104,6 +104,15 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.S
 	@echo "Assembling $<"
 	@mkdir -p $(@D)
 	@$(CC) -I $(INCLUDE_DIR) -c $< -o $@
+
+compile_commands:
+	@echo "Generating ../compile_commands.json"
+	@{ printf '['; sep=''; \
+	  for f in $(abspath $(SRC_C)); do \
+	    printf '%s\n  {"directory": "%s", "file": "%s", "command": "cc -std=gnu99 -I %s -I %s -c %s"}' \
+	      "$$sep" "$(CURDIR)" "$$f" "$(abspath $(INCLUDE_DIR))" "$(abspath $(BUILD_DIR))" "$$f"; \
+	    sep=','; \
+	  done; printf '\n]\n'; } > ../compile_commands.json
 
 clean:
 	@rm -rf $(BUILD_DIR) prog.bin prog.irom.bin prog.elf
