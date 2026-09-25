@@ -1,5 +1,5 @@
+#include "logging.h"
 #include "wait.h"
-#include "uart.h"
 #include "rf_i2c.h"
 #include "reg_util.h"
 #include "wifi_regs.h"
@@ -62,7 +62,7 @@ void wifi_set_channel(unsigned int ch) {
         if (pll_wait_locked())
             break;
         if (try == 7)
-            kprintf_uart("wifi: rfpll cal timeout\n");
+            kernel_debug("wifi: rfpll cal timeout\n");
     }
     WRITE_REG_UNMASK(RFPLL_CTRL, RFPLL_LATCH);
 

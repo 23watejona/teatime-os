@@ -1,3 +1,4 @@
+#include "logging.h"
 #include "reg_util.h"
 #include "wifi_regs.h"
 #include "wifi_dma.h"
@@ -25,7 +26,7 @@ void init_wifi_dma(void) {
 
     unsigned char *region = (unsigned char *) alloc(total);
     if (!region) {
-        kprintf_uart("init_wifi_dma: region alloc failed (%u bytes)\n", total);
+        kernel_debug("init_wifi_dma: region alloc failed (%u bytes)\n", total);
         return;
     }
 
@@ -57,7 +58,7 @@ void init_wifi_dma(void) {
     rx_ctrl_desc->buf_ptr = ctrl_word;
     rx_ctrl_desc->next = 0;
 
-    kprintf_uart("init_wifi_dma: desc=%x data=%x..%x ctrl=%x\n",
+    kernel_debug("init_wifi_dma: desc=%x data=%x..%x ctrl=%x\n",
                  rx_ring, rx_data_base, rx_data_end, rx_ctrl_desc);
 
     WRITE_REG(MAC_DMA_RX_WINDOW_BASE, (unsigned int) rx_ring);

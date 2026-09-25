@@ -1,5 +1,5 @@
 #include "reg_util.h"
-#include "uart.h"
+#include "logging.h"
 #include "string.h"
 #include "wifi_crypto.h"
 #include "wifi_frame.h"
@@ -67,7 +67,7 @@ const unsigned char rsn_ie[RSN_IE_LEN] = {
 
 void wpa_prep(void) {
     wpa2_pmk(passphrase, (const u8 *)ap_ssid, strlen(ap_ssid), pmk);
-    kprintf_uart("wpa: PMK ready\n");
+    kernel_debug("wpa: PMK ready\n");
 }
 
 void wpa_begin(void) {
@@ -75,7 +75,7 @@ void wpa_begin(void) {
         return;
     rng_fill(snonce, 32);
     wpa_state = WPA_WAIT_M1;
-    kprintf_uart("wpa: armed, waiting for EAPOL msg1\n");
+    kernel_debug("wpa: armed, waiting for EAPOL msg1\n");
 }
 
 static void derive_ptk(void) {
@@ -206,12 +206,12 @@ static void handle_m1(volatile u8 *e) {
     derive_ptk();
     send_eapol(2 | KI_PAIRWISE | KI_MIC, snonce, rsn_ie, sizeof(rsn_ie));
     wpa_state = WPA_WAIT_M3;
-    kprintf_uart("wpa: msg1 rx, msg2 sent\n");
+    kernel_debug("wpa: msg1 rx, msg2 sent\n");
 }
 
 static void handle_m3(volatile u8 *e, unsigned int elen) {
     if (!mic_ok(e, elen)) {
-        kprintf_uart("wpa: msg3 MIC FAIL\n");
+        kernel_debug("wpa: msg3 MIC FAIL\n");
         return;
     }
     memcpy(replay, (const void *)(e + E_REPLAY), 8);
@@ -234,14 +234,14 @@ static void handle_m3(volatile u8 *e, unsigned int elen) {
             send_eapol(2 | KI_PAIRWISE | KI_MIC | KI_SECURE, 0, 0, 0);
         wifi_ccmp_install_keys();
         wpa_state = WPA_DONE;
-        kprintf_uart("wpa: msg3 MIC ok, msg4 sent — 4-way COMPLETE (gtk_len=%u id=%u)\n",
+        kernel_debug("wpa: msg3 MIC ok, msg4 sent — 4-way COMPLETE (gtk_len=%u id=%u)\n",
                      wpa_gtk_len, wpa_gtk_id);
     }
 }
 
 static void handle_group_m1(volatile u8 *e, unsigned int elen) {
     if (!mic_ok(e, elen)) {
-        kprintf_uart("wpa: group msg1 MIC FAIL\n");
+        kernel_debug("wpa: group msg1 MIC FAIL\n");
         return;
     }
     memcpy(replay, (const void *)(e + E_REPLAY), 8);
@@ -257,7 +257,7 @@ static void handle_group_m1(volatile u8 *e, unsigned int elen) {
     wifi_ccmp_install_gtk();
 
     send_eapol(2 | KI_MIC | KI_SECURE, 0, 0, 0);
-    kprintf_uart("wpa: GTK rekeyed (len=%u id=%u), msg2 sent\n", wpa_gtk_len, wpa_gtk_id);
+    kernel_debug("wpa: GTK rekeyed (len=%u id=%u), msg2 sent\n", wpa_gtk_len, wpa_gtk_id);
 }
 
 void wifi_wpa_eapol(unsigned char *llc, unsigned int len) {

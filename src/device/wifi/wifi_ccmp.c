@@ -1,11 +1,11 @@
+#include "logging.h"
+#include "def.h"
 #include "reg_util.h"
 #include "wifi_regs.h"
-#include "uart.h"
 #include "string.h"
 #include "wifi_frame.h"
 #include "wifi_tx.h"
 #include "wifi_wpa.h"
-#include "wifi_crypto.h"
 #include "wifi_ccmp.h"
 
 // tx hands the mac plaintext behind a ccmp header and the mac fills the mic; rx comes back decrypted in place but still carrying the ccmp header and mic, so wifi_ccmp_rx strips them
@@ -40,7 +40,7 @@ void wifi_ccmp_install_keys(void) {
 
     WRITE_REG(MAC_CRYPTO_CIPHER, MAC_CIPHER_CCMP);
 
-    kprintf_uart("ccmp: keys installed (enable=%x eng=%x)\n",
+    kernel_debug("ccmp: keys installed (enable=%x eng=%x)\n",
                  READ_REG(MAC_KEY_ENABLE), READ_REG(MAC_CRYPTO_CIPHER));
 }
 

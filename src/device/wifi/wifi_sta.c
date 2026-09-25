@@ -1,3 +1,4 @@
+#include "logging.h"
 #include "timer.h"
 #include "proc.h"
 #include "reg_util.h"
@@ -131,14 +132,14 @@ void wifi_station_tick(void) {
             return;
         wifi_locked_channel = wifi_target_channel;
         program_rx_filter();
-        kprintf_uart("sta: locking channel %d\n", wifi_locked_channel);
+        kernel_debug("sta: locking channel %d\n", wifi_locked_channel);
         wifi_sta_state = STA_AUTH;
         last_tx = now - RETRY_PERIOD;
         return;
     case STA_AUTH:
     case STA_ASSOC:
         if (now - last_heard >= BEACON_LOSS) {
-            kprintf_uart("sta: beacon loss, rescanning\n");
+            kernel_debug("sta: beacon loss, rescanning\n");
             link_down(1);
             return;
         }
@@ -152,13 +153,13 @@ void wifi_station_tick(void) {
         return;
     case STA_RUN:
         if (now - last_heard >= BEACON_LOSS) {
-            kprintf_uart("sta: beacon loss, rescanning\n");
+            kernel_debug("sta: beacon loss, rescanning\n");
             link_down(1);
             return;
         }
         // the 4-way only advances on ap retransmits, so once the ap gives up only a fresh auth restarts it
         if (wpa_state != WPA_DONE && now - run_since >= WPA_STALL) {
-            kprintf_uart("sta: handshake stalled, re-authenticating\n");
+            kernel_debug("sta: handshake stalled, re-authenticating\n");
             link_down(0);
         }
         return;
@@ -201,7 +202,7 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
 
     if (subtype == MGMT_DEAUTH || subtype == MGMT_DISASSOC) {
         volatile struct reason_body *r = (volatile struct reason_body *)body;
-        kprintf_uart("sta: %s reason=%u, re-authenticating\n",
+        kernel_debug("sta: %s reason=%u, re-authenticating\n",
                      subtype == MGMT_DEAUTH ? "DEAUTH" : "DISASSOC", r->reason);
         if (wifi_sta_state != STA_INIT)
             link_down(0);
@@ -214,20 +215,20 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
         if (auth->sequence != AUTH_SEQ_RESPONSE)
             return;
         if (status != 0) {
-            kprintf_uart("sta: auth rejected status=%u\n", status);
+            kernel_debug("sta: auth rejected status=%u\n", status);
             return;
         }
         if (wifi_sta_state == STA_AUTH) {
             wifi_sta_state = STA_ASSOC;
             last_tx = ticks() - RETRY_PERIOD;
-            kprintf_uart("sta: authenticated, associating\n");
+            kernel_debug("sta: authenticated, associating\n");
         }
     } else if (subtype == MGMT_ASSOC_RESP) {
         volatile struct assoc_resp_body *assoc = (volatile struct assoc_resp_body *)body;
         unsigned int status = assoc->status;
         unsigned int aid = assoc->aid & AID_MASK;
         if (status != 0) {
-            kprintf_uart("sta: assoc rejected status=%u\n", status);
+            kernel_debug("sta: assoc rejected status=%u\n", status);
             return;
         }
         if (wifi_sta_state == STA_ASSOC) {
@@ -235,7 +236,7 @@ void wifi_sta_input(volatile unsigned char *buf, unsigned int len) {
             wifi_sta_state = STA_RUN;
             last_heard = ticks();
             run_since = last_heard;
-            kprintf_uart("sta: ASSOCIATED aid=%u\n", aid);
+            kernel_debug("sta: ASSOCIATED aid=%u\n", aid);
             wpa_begin();
         }
     }

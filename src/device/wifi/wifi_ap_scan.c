@@ -1,3 +1,4 @@
+#include "logging.h"
 #include "uart.h"
 #include "wifi_frame.h"
 
@@ -107,16 +108,16 @@ void wifi_ap_observe(volatile unsigned char *buf, unsigned int buflen) {
 
     bssid_remember(bssid);
 
-    kprintf_uart("AP #%d  \"", ap_count);
+    kernel_debug("AP #%d  \"", ap_count);
     if (ssid_len == 0) {
-        kprintf_uart("<hidden>");
-    } else {
+        kernel_debug("<hidden>");
+    } else if (LOG_LEVEL == DEBUG) {
         for (unsigned int i = 0; i < ssid_len && i < 32; i++) {
             unsigned char c = ssid[i];
             kputc_uart((c >= 0x20 && c < 0x7f) ? c : '.');
         }
     }
-    kprintf_uart("\"  %x:%x:%x:%x:%x:%x  ch=%d  rssi=%d  %s\n",
+    kernel_debug("\"  %x:%x:%x:%x:%x:%x  ch=%d  rssi=%d  %s\n",
                  bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
                  channel, rssi, sec);
 }

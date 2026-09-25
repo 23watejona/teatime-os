@@ -4,6 +4,7 @@
 #include "uart.h"
 #include "timer.h"
 #include "wifi_regs.h"
+#include "logging.h"
 
 void wifi_set_channel(unsigned int ch);
 void rf_regs_init(void);
@@ -135,7 +136,7 @@ void wifi_rf_on(void) {
 // measures the on-chip rc time constant and writes matching filter trims, so the baseband filter corners land on their design bandwidth despite process spread
 void rc_calibrate(void) {
     // the measurement runs in block 106 with block 104 powered for it: setup fields first, then bit 3 of register 4 pulsed as the start
-    kprintf_uart("      rc:w1\n");
+    kernel_debug("      rc:w1\n");
     rf_i2c_write_mask(106, 2, 0, 5, 4, 0);
     rf_i2c_write_mask(106, 2, 4, 7, 4, 1);
     rf_i2c_write_mask(104, 3, 1, 0, 0, 1);
@@ -144,14 +145,14 @@ void rc_calibrate(void) {
     rf_i2c_write_mask(106, 2, 3, 6, 6, 1);
     rf_i2c_write_mask(106, 2, 4, 3, 3, 0);
     rf_i2c_write_mask(106, 2, 4, 3, 3, 1);
-    kprintf_uart("      rc:wait\n");
+    kernel_debug("      rc:wait\n");
     wait_us(100);
 
     // the six-bit count is the measured time constant; block 104 is powered down again once it is read
-    kprintf_uart("      rc:read\n");
+    kernel_debug("      rc:read\n");
     unsigned int v = rf_i2c_read(106, 2, 5) & 0x3f;
     rf_i2c_write_mask(104, 3, 1, 0, 0, 0);
-    kprintf_uart("      rc:done\n");
+    kernel_debug("      rc:done\n");
 
     // two linear fits map the count to the filter trims of blocks 97 and 102, each written with its enable bit
     int rc_a = (16 * (int)v - 39) / 30;
@@ -436,7 +437,7 @@ static void tx_dc_offset_calibrate(void) {
     pbus_force(1, 2, sel[1]);
 
     tx_dc_offset_apply(TX_RF_ANA_GAIN, sel);
-    kprintf_uart("dcoff: p0=%d,%d p1=%d,%d p2=%d,%d p3=%d,%d sel[%d]=%d,%d\n",
+    kernel_debug("dcoff: p0=%d,%d p1=%d,%d p2=%d,%d p3=%d,%d sel[%d]=%d,%d\n",
                  pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1],
                  pairs[2][0], pairs[2][1], pairs[3][0], pairs[3][1],
                  idx, sel[0], sel[1]);
@@ -547,16 +548,16 @@ void bb_bringup(void) {
     rf_i2c_write(97, 1, 7, 81);
     init_wifi_pbus();
     rf_i2c_write_mask(I2C_BB, 0, 16, 0, 0, 1);
-    kprintf_uart("    bb: rc_calibrate\n");
+    kernel_debug("    bb: rc_calibrate\n");
     rc_calibrate();
-    kprintf_uart("    bb: dcoffset\n");
+    kernel_debug("    bb: dcoffset\n");
     tx_dc_offset_calibrate();
-    kprintf_uart("    bb: init_wifi_bb\n");
+    kernel_debug("    bb: init_wifi_bb\n");
     init_wifi_bb();
     WRITE_REG_MASK(MAC_PHY_CTRL, MAC_PHY_RF_UP);
-    kprintf_uart("    bb: noise_init\n");
+    kernel_debug("    bb: noise_init\n");
     noise_init();
-    kprintf_uart("    bb: dpd_bypass\n");
+    kernel_debug("    bb: dpd_bypass\n");
     dpd_bypass();
 }
 
@@ -627,30 +628,30 @@ static void analog_reg_default(void) {
 }
 
 void init_wifi_rf(void) {
-    kprintf_uart("  rf: analog_reg_default\n");
+    kernel_debug("  rf: analog_reg_default\n");
     analog_reg_default();
-    kprintf_uart("  rf: powerup_option_set\n");
+    kernel_debug("  rf: powerup_option_set\n");
     powerup_option_set();
     // must run before rf init
-    kprintf_uart("  rf: antenna_switch_init\n");
+    kernel_debug("  rf: antenna_switch_init\n");
     antenna_switch_init();
-    kprintf_uart("  rf: rf_init\n");
+    kernel_debug("  rf: rf_init\n");
     rf_init();
-    kprintf_uart("  rf: bb_bringup\n");
+    kernel_debug("  rf: bb_bringup\n");
     bb_bringup();
     rf_i2c_write_mask(103, 4, 4, 4, 0, 0x13); // block 103 register 4 low field to its running value once the baseband is up
-    kprintf_uart("  rf: rx_digital_stop\n");
+    kernel_debug("  rf: rx_digital_stop\n");
     unsigned int dig = rx_digital_stop();
-    kprintf_uart("  rf: bbpll_calibrate\n");
+    kernel_debug("  rf: bbpll_calibrate\n");
     bbpll_calibrate(0);
     // the rx path wants the bb rx clock off, so it is explicitly left at its reset default
-    kprintf_uart("  rf: rx_clock_enable\n");
+    kernel_debug("  rf: rx_clock_enable\n");
     rx_clock_enable(0);
-    kprintf_uart("  rf: rx_path_enable\n");
+    kernel_debug("  rf: rx_path_enable\n");
     rx_path_enable();
-    kprintf_uart("  rf: rx_digital_start\n");
+    kernel_debug("  rf: rx_digital_start\n");
     rx_digital_start(dig);
-    kprintf_uart("  rf: agc_enable\n");
+    kernel_debug("  rf: agc_enable\n");
     agc_enable();
 
     WRITE_REG_UNMASK(BB_RX_CTRL, BB_NOISE_MEAS);
