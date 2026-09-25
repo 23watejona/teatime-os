@@ -42,26 +42,26 @@ IRAM_ATTR static void flash_cache_enable(void)
 {
     while (READ_REG(CACHE_CTRL) & 0x100)
         WRITE_REG_UNMASK(CACHE_CTRL, 0x100); // must be off before the flush below
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
 
     WRITE_REG_UNMASK(SPI0_CTRL, 0x20000); // spi0 cache arbitration, held off across the flush
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
 
     WRITE_REG_UNMASK(CACHE_CTRL, 1);
     WRITE_REG_MASK(CACHE_CTRL, 1);
     while (!(READ_REG(CACHE_CTRL) & 2))
         ;
     WRITE_REG_UNMASK(CACHE_CTRL, 1);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
 
     WRITE_REG_MASK(SPI0_CTRL, 0x20000);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
 
     // block select and count cleared, single-mb mode: maps the first mb of flash
     WRITE_REG_UNMASK(CACHE_CTRL, 0x03000000);
     WRITE_REG_RMW(CACHE_CTRL, 0xfbf8ffff, 1u << 26);
     WRITE_REG_MASK(CACHE_CTRL2, 0x18);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
 
     WRITE_REG_MASK(CACHE_CTRL, 0x100);
     while (!(READ_REG(CACHE_CTRL) & 0x100))

@@ -71,7 +71,7 @@ IRAM_ATTR unsigned int wifi_rx_nmi_drain(void) {
             for (; i < len; i++)
                 s->buf[i] = src[i];
             s->len = (unsigned short) len;
-            asm volatile("memw");
+            asm volatile("memw" ::: "memory");
             stage_head = stage_head + 1;
         } else {
             wifi_rx_dropped++;
