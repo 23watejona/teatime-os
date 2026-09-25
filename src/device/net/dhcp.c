@@ -1,3 +1,4 @@
+#include "logging.h"
 #include "def.h"
 #include "string.h"
 #include "uart.h"
@@ -5,7 +6,6 @@
 #include "udp.h"
 #include "dhcp.h"
 #include "dev.h"
-#include "proc.h"
 #include "timer.h"
 
 #define XID 0x7ea7ea00
@@ -65,7 +65,7 @@ void dhcp_proc(void) {
     }
     if (i == RETRIES)
         return;
-    kprintf_uart("dhcp: offer %u.%u.%u.%u\n", reply->yiaddr.bytes[0], reply->yiaddr.bytes[1],
+    kernel_debug("dhcp: offer %u.%u.%u.%u\n", reply->yiaddr.bytes[0], reply->yiaddr.bytes[1],
                  reply->yiaddr.bytes[2], reply->yiaddr.bytes[3]);
 
     // no relay on this lan, so the offer's source is the server
