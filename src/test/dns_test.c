@@ -6,7 +6,7 @@
 #include "timer.h"
 
 static void dns_test_send(void) {
-    struct ipv4_addr resolver = {{1, 1, 1, 1}};
+    struct ipv4_addr resolver = { .bytes = {1, 1, 1, 1} };
     struct ipv4_addr a;
     kprintf_uart("dns: A? google.com -> 1.1.1.1\n");
     if (dns_resolve("google.com", resolver, &a) == 0)
