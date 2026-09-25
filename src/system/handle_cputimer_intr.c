@@ -21,7 +21,7 @@ IRAM_ATTR void handle_cpu_timer_intr(void) {
     cond_clock();
     // pulse the nmi arm gate so a still-pending event makes a fresh edge; never from the nmi itself, since that nests an entry inside the handler
     WRITE_REG(0x3ff00000, READ_REG(0x3ff00000) & 0xffffffe0);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
     WRITE_REG(0x3ff00000, (READ_REG(0x3ff00000) & 0xffffffe0) | 1);
     sched();
 }

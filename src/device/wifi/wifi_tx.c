@@ -117,13 +117,13 @@ int wifi_tx_frame(const unsigned char *frame, unsigned int len) {
     mutex_lock(dma_mutex);
     unsigned int prev_tx_count = wifi_fiq_tx_count;
 
-    __asm__ volatile("memw");
+    __asm__ volatile("memw" ::: "memory");
     WRITE_REG(q + TXQ_RATE, rate);
     WRITE_REG(q + TXQ_DURATION, duration);
     WRITE_REG(q + TXQ_LIFETIME, lifetime);
     WRITE_REG(q + TXQ_LEN, (air << 12) & 0x3ff000);
     WRITE_REG(q + TXQ_DESC, desc_addr | fmt);
-    __asm__ volatile("memw");
+    __asm__ volatile("memw" ::: "memory");
     WRITE_REG_MASK(q + TXQ_DESC, TX_GO_BITS);
 
     int rc = -1;

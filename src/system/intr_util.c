@@ -13,7 +13,7 @@ void (*l1_interrupt_handlers[NUM_L1_INTR])(void);
 IRAM_ATTR void debug_handler() {
   unsigned int debug_cause = 0;
 
-  asm("rsr.debugcause %0": "=a" (debug_cause): : "memory");
+  asm volatile("rsr.debugcause %0": "=a" (debug_cause): : "memory");
 
   kprintf_uart("\nDebug Cause: %d\n", debug_cause);
   if (((debug_cause >> 3) & 0x1) == 1) {
@@ -31,8 +31,8 @@ IRAM_ATTR void syscall_handler (unsigned int exccause, unsigned int *frame) {
     switch (exccause) {
         default: {
             unsigned int epc, vaddr;
-            asm("rsr.epc1 %0" : "=r"(epc));
-            asm("rsr.excvaddr %0" : "=r"(vaddr));
+            asm volatile("rsr.epc1 %0" : "=r"(epc));
+            asm volatile("rsr.excvaddr %0" : "=r"(vaddr));
             // interrupted a0 and sp, from the frame layout in ctxsw.s
             unsigned int a0 = frame[0x50 / 4];
             unsigned int a1 = (unsigned int)frame + 96;
@@ -62,8 +62,8 @@ IRAM_ATTR void syscall_handler (unsigned int exccause, unsigned int *frame) {
         
         // a level-1 interrupt, not a synchronous exception
         case 4:
-            asm("rsr.interrupt %0\n" : "=r"(interrupt));
-            asm("rsr.intenable %0\n" : "=r"(intenable));
+            asm volatile("rsr.interrupt %0\n" : "=r"(interrupt));
+            asm volatile("rsr.intenable %0\n" : "=r"(intenable));
             unsigned int masked_interrupts = interrupt & intenable;
             for (int i = 0; i < NUM_L1_INTR; ++i) {
                 int curr_intr_mask = 1u << i;

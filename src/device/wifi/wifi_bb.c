@@ -18,7 +18,7 @@ void init_wifi_bb(void) {
     WRITE_REG(0x60009b6c, 0x0914bc81);
     WRITE_REG(0x60009b68, 0x5ac64198);
     WRITE_REG_UNMASK(0x60009b50, 0x80000000);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
     // a counter set long first and shortened once the thresholds below are in
     WRITE_REG(0x60009d18, 400);
     WRITE_REG_RMW(0x600098ec, 0xfc00ffff, 0x01900000);
@@ -38,7 +38,7 @@ void init_wifi_bb(void) {
     // two threshold words
     WRITE_REG_RMW(0x60009b5c, 0xffc00000, 0x00385854);
     WRITE_REG_RMW(0x60009b50, 0xf00fff00, 0x0b2000e6);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
     WRITE_REG(0x60009d18, 0x80);
     WRITE_REG_MASK(0x60009d10, 4);
     WRITE_REG_RMW(0x60009d70, 0xdffff03f, 0x20000c40);
@@ -61,7 +61,7 @@ void init_wifi_bb(void) {
 
     // front-end enables: the 11b path bit, two whole words, a full 12-bit mask, and the tx cal bit cleared
     WRITE_REG_RMW(0x60009838, 0xffffffcf, 0x20);
-    asm volatile("memw");
+    asm volatile("memw" ::: "memory");
     WRITE_REG(0x60009c48, 0x00800083);
     WRITE_REG_MASK(0x60009c4c, 6);
     WRITE_REG(0x60009d1c, 0x00000fff);
