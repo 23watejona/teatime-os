@@ -7,7 +7,7 @@ CC=$(CROSS)gcc
 LD=$(CROSS)ld
 AS=$(CROSS)as
 
-CFLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-unused-function -Wno-missing-braces -O0 \
+CFLAGS=-MMD -P -g -std=gnu99 -Wall -Werror -Wno-unused-function -O0 \
        -ffreestanding -fzero-initialized-in-bss -I $(INCLUDE_DIR) \
        -ffunction-sections -fdata-sections -mlongcalls
 LDFLAGS=-nostdlib -nostartfiles --gc-sections

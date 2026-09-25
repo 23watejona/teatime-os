@@ -29,7 +29,7 @@ extern queue_entry *avail_list;
 extern unsigned int _bss_start, _bss_end;
 extern unsigned int _nmi_stack_bottom;
 
-proctab_entry proctab[NUM_PROC] = {0};
+proctab_entry proctab[NUM_PROC];
 int curr_pid = 0;
 unsigned int boot_reset_cause;
 
