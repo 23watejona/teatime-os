@@ -13,6 +13,10 @@ struct ipv4_addr {
     };
 };
 
+extern struct ipv4_addr local_ip;
+extern struct ipv4_addr gw_ip;
+extern struct ipv4_addr net_mask;
+
 union ipv4_header {
     struct {
         unsigned char version_ihl;
