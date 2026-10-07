@@ -9,5 +9,8 @@ compile/build/
 # Injected AP credentials — never commit
 src/include/ap_secrets.h
 
-# Private per-checkout instructions
-CLAUDE.local.md
+*.local.md
+
+.*
+/q*
+/compile_commands.json
