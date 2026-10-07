@@ -136,3 +136,13 @@ void free(void *p) {
 	insert_free((memblk_t *)((char *)p - ALLOC_MEMBLK_SIZE));
 	enable(m);
 }
+
+unsigned int heap_available(void) {
+	unsigned int total = 0;
+	int m = disable();
+	for (memblk_t *itr = freelist; itr != NULL; itr = itr->next) {
+		total += itr->size;
+	}
+	enable(m);
+	return total;
+}

@@ -26,4 +26,5 @@ int initmem(void);
 char *alloc(unsigned int size);
 char *alloc_stack(unsigned int size);
 void free(void *p);
+unsigned int heap_available(void);
 #endif
