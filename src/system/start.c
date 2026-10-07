@@ -7,6 +7,7 @@
 #include "wdt.h"
 #include "net.h"
 #include "tcp.h"
+#include "telnet.h"
 #include "udp.h"
 #include "mem.h"
 #include "timer.h"
@@ -101,6 +102,7 @@ IRAM_ATTR void start ( void )
     ipv4_init();
     udp_init();
     tcp_init();
+    telnet_init();
     make_avail(NULL_PROC);
 
     wifi_secrets_init();
