@@ -17,6 +17,7 @@ static unsigned char rx_ring[RX_RING_SIZE];
 static volatile unsigned int rx_head;
 static volatile unsigned int rx_tail;
 static volatile unsigned int rx_dropped;
+static volatile unsigned int rx_overruns;
 static int rx_mutex;
 static int tx_mutex;
 static struct dev *uart_dev;
@@ -92,10 +93,15 @@ void kprintf_uart(char *f, ...) {
 
 static void uart_intr(void) {
     int tx_drained = uart0.int_status.txfifo_empty;
+    int overflowed = uart0.int_status.rxfifo_overflow;
     // clear before draining, so a byte that lands after the drain raises its own timeout event
     uart0.int_clear.rxfifo_full = 1;
     uart0.int_clear.rxfifo_timeout = 1;
+    uart0.int_clear.rxfifo_overflow = 1;
     uart0.int_clear.txfifo_empty = 1;
+    if (overflowed) {
+        rx_overruns = rx_overruns + 1;
+    }
     if (tx_drained) { // the empty condition holds until the writer refills, so mask it here and let uart_write re-arm
         uart0.int_enable.txfifo_empty = 0;
         cond_signal_isr(uart_dev->cond);
@@ -147,9 +153,20 @@ static int uart_write(struct dev *d, const void *buf, unsigned int n) {
     return n;
 }
 
+static int uart_control(struct dev *d, int op, int arg) {
+    switch (op) {
+        case UART_RX_DROPPED:
+            return rx_dropped;
+        case UART_RX_OVERRUNS:
+            return rx_overruns;
+    }
+    return -1;
+}
+
 static const struct dev_ops uart_ops = {
     .read = uart_read,
     .write = uart_write,
+    .control = uart_control,
 };
 
 void uart_init(void) {
@@ -158,6 +175,7 @@ void uart_init(void) {
     uart0.int_enable.rxfifo_full = 0;
     uart0.int_enable.txfifo_empty = 0;
     uart0.int_enable.rxfifo_timeout = 0;
+    uart0.int_enable.rxfifo_overflow = 0;
     uart0.conf1.rxfifo_full_threshold = RX_FULL_THRESHOLD;
     uart0.conf1.txfifo_empty_threshold = TX_EMPTY_THRESHOLD;
     uart0.conf1.rx_flow_enable = 0;
@@ -167,10 +185,12 @@ void uart_init(void) {
         (void)uart0.fifo.rw;
     uart0.int_clear.rxfifo_full = 1;
     uart0.int_clear.rxfifo_timeout = 1;
+    uart0.int_clear.rxfifo_overflow = 1;
     uart0.int_clear.txfifo_empty = 1;
     l1_interrupt_handlers[INUM_UART] = uart_intr;
     uart0.int_enable.rxfifo_full = 1;
     uart0.int_enable.rxfifo_timeout = 1;
+    uart0.int_enable.rxfifo_overflow = 1;
     intr_unmask(1u << INUM_UART);
     uart_dev = dev_register("uart0", &uart_ops, NULL);
 }

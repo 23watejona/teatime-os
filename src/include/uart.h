@@ -4,6 +4,10 @@
 #define UART_DEFAULT_BAUD (76800u)
 #define UART_FIFO_RESET (0x60000u)
 
+// uart0 control ops, counting since boot: bytes lost to a full ring, and hardware fifo overflows
+#define UART_RX_DROPPED 1
+#define UART_RX_OVERRUNS 2
+
 void kprintf_uart(char *f, ...);
 void kputc_uart(int c);
 
