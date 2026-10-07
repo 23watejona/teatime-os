@@ -12,11 +12,14 @@ void htcpcp_proc(void);
 void pulse_proc(void);
 void console_test_proc(void);
 void gpio_test_proc(void);
+void term_proc(void);
+void telnet_proc(void);
 
 void main(void)
 {
     spawn(dhcp_proc, APP_STK, APP_PRIO);
-    spawn(htcpcp_proc, HTTP_STK, APP_PRIO);
+    spawn(term_proc, APP_STK, APP_PRIO);
+    spawn(telnet_proc, APP_STK, APP_PRIO);
     while (1)
         asm("waiti 0");
 }
